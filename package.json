@@ -1,0 +1,13 @@
+{
+  "name": "interactio",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "admin",
+    "web"
+  ],
+  "scripts": {
+    "dev:admin": "npm run start --prefix admin",
+    "dev:web": "npm run dev --prefix web"
+  }
+}
