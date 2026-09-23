@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { listenActiveCard, listenResponses, listenSession } from '../../../src/firebase';
 import type { Card, CardMap, Response, SessionMeta } from '../../../src/types';
+import { PassiveWordCloud, WordCloudGraph } from '../../../src/components/PassiveWordCloud';
 
 // ─────────────────────────────────────────────
 // Tipos locais
@@ -229,6 +230,7 @@ interface PageProps {
 
 export default function DisplayPage({ params }: PageProps) {
   const { meta, activeCard, responses, totalAnswered } = useDisplaySession(params.id);
+  const [isPassiveMode, setIsPassiveMode] = useState(false);
 
   // Calcula dados do gráfico somente quando responses ou activeCard mudam
   const tally    = useMemo(() => activeCard?.type === 'multiple_choice' || activeCard?.type === 'quiz'
@@ -260,9 +262,38 @@ export default function DisplayPage({ params }: PageProps) {
       {/* Header com sessão + contador */}
       <div style={display.topBar}>
         <span style={display.topBarCode}>{meta?.code}</span>
-        <div style={display.livePill}>
-          <div style={display.liveDot} />
-          Ao vivo
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={display.livePill}>
+            <div style={display.liveDot} />
+            Ao vivo
+          </div>
+
+          {/* Alternador de Modo de Escuta para Nuvem de Palavras */}
+          {(activeCard.type === 'word_cloud' || activeCard.type === 'passive_word_cloud') && (
+            <button
+              type="button"
+              onClick={() => setIsPassiveMode((prev) => !prev)}
+              style={{
+                backgroundColor: isPassiveMode || activeCard.type === 'passive_word_cloud' ? 'rgba(167,139,250,0.18)' : 'rgba(255,255,255,0.06)',
+                border: isPassiveMode || activeCard.type === 'passive_word_cloud' ? '1px solid rgba(167,139,250,0.4)' : '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 100,
+                padding: '6px 14px',
+                color: isPassiveMode || activeCard.type === 'passive_word_cloud' ? '#c084fc' : '#8b89a0',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <svg style={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+              {isPassiveMode || activeCard.type === 'passive_word_cloud' ? 'Escuta Passiva (Voz)' : 'Respostas Participantes'}
+            </button>
+          )}
         </div>
         <span style={display.topBarCount}>{totalAnswered} respostas</span>
       </div>
@@ -275,8 +306,25 @@ export default function DisplayPage({ params }: PageProps) {
         {(activeCard.type === 'multiple_choice' || activeCard.type === 'quiz') && (
           <BarChart entries={tally} total={totalAnswered} />
         )}
+        {activeCard.type === 'passive_word_cloud' && (
+          <div style={{ flex: 1, minHeight: 480, display: 'flex' }}>
+            <PassiveWordCloud question="" />
+          </div>
+        )}
         {activeCard.type === 'word_cloud' && (
-          <WordCloud words={wordData} />
+          isPassiveMode ? (
+            <div style={{ flex: 1, minHeight: 480, display: 'flex' }}>
+              <PassiveWordCloud question="" />
+            </div>
+          ) : (
+            <div style={{ flex: 1, minHeight: 480, display: 'flex', flexDirection: 'column' }}>
+              <WordCloudGraph
+                words={wordData.map((w) => ({ text: w.word, count: w.count }))}
+                minFontSize={24}
+                maxFontSize={84}
+              />
+            </div>
+          )
         )}
         {activeCard.type === 'open_text' && (
           <OpenTextList responses={responses} />
