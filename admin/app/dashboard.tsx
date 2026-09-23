@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getDatabase, ref, onValue, remove, update } from 'firebase/database';
-import { getAuth } from 'firebase/auth'; 
+import { getAuth, onAuthStateChanged } from 'firebase/auth'; 
 import '../src/firebase'; 
 
 type TabType = 'home' | 'sessions' | 'settings';
@@ -44,6 +44,7 @@ export default function DashboardScreen() {
 
   const [sessions, setSessions] = useState<any[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [toast, setToast] = useState<{message: string, type: 'error' | 'success'} | null>(null);
 
@@ -53,37 +54,98 @@ export default function DashboardScreen() {
   };
 
   useEffect(() => {
+    let isMounted = true;
+    let unsubscribeDatabase: (() => void) | null = null;
     const auth = getAuth();
-    if (auth.currentUser) setUserEmail(auth.currentUser.email);
-
     const db = getDatabase();
-    const sessionsRef = ref(db, 'sessions');
 
-    const unsubscribe = onValue(sessionsRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const currentUserId = auth.currentUser?.uid;
-
-        // ── 3. ISOLAMENTO DE DADOS: Filtra apenas as sessões criadas por este utilizador ──
-        const sessionsList = Object.keys(data).map(key => ({
-          id: key,
-          ...data[key]
-        }))
-        .filter(session => session.userId === currentUserId)
-        .sort((a, b) => {
-          const timeA = a.updatedAt || a.createdAt || 0;
-          const timeB = b.updatedAt || b.createdAt || 0;
-          return timeB - timeA;
+    // Timeout de segurança: nunca deixa o loading infinito mesmo em caso de conexão instável
+    const safetyTimeout = setTimeout(() => {
+      if (isMounted) {
+        setLoadingSessions((current) => {
+          if (current) {
+            console.warn('[Dashboard] Timeout de segurança atingido. Concluindo carregamento.');
+            return false;
+          }
+          return false;
         });
-
-        setSessions(sessionsList);
-      } else {
-        setSessions([]);
       }
-      setLoadingSessions(false);
+    }, 5000);
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (!isMounted) return;
+
+      if (user) {
+        setUserEmail(user.email);
+      }
+
+      const sessionsRef = ref(db, 'sessions');
+
+      if (unsubscribeDatabase) {
+        unsubscribeDatabase();
+      }
+
+      try {
+        unsubscribeDatabase = onValue(
+          sessionsRef,
+          (snapshot) => {
+            if (!isMounted) return;
+            try {
+              const data = snapshot.val();
+              if (data && typeof data === 'object') {
+                const currentUserId = user?.uid || auth.currentUser?.uid;
+
+                // ── 3. ISOLAMENTO DE DADOS: Filtra apenas as sessões criadas por este utilizador ──
+                const sessionsList = Object.keys(data)
+                  .map((key) => ({
+                    id: key,
+                    ...data[key],
+                  }))
+                  .filter((session) => !currentUserId || !session.userId || session.userId === currentUserId)
+                  .sort((a, b) => {
+                    const timeA = a.updatedAt || a.createdAt || 0;
+                    const timeB = b.updatedAt || b.createdAt || 0;
+                    return timeB - timeA;
+                  });
+
+                setSessions(sessionsList);
+                setLoadError(null);
+              } else {
+                setSessions([]);
+              }
+            } catch (processError: any) {
+              console.error('[Dashboard] Erro ao processar dados de sessões:', processError);
+              setLoadError('Erro ao processar as sessões.');
+              setSessions([]);
+            } finally {
+              setLoadingSessions(false);
+            }
+          },
+          (error: any) => {
+            if (!isMounted) return;
+            console.error('[Dashboard] Erro ao buscar sessões no Firebase:', error);
+            setLoadError(`Não foi possível carregar as sessões (${error?.message || 'Erro de conexão'}).`);
+            setSessions([]);
+            setLoadingSessions(false);
+          }
+        );
+      } catch (err: any) {
+        if (!isMounted) return;
+        console.error('[Dashboard] Falha ao conectar listener:', err);
+        setLoadError(`Falha de inicialização (${err?.message || 'Erro'}).`);
+        setSessions([]);
+        setLoadingSessions(false);
+      }
     });
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      clearTimeout(safetyTimeout);
+      unsubscribeAuth();
+      if (unsubscribeDatabase) {
+        unsubscribeDatabase();
+      }
+    };
   }, []);
 
   const handleTabSwitch = (tab: TabType) => {
@@ -253,6 +315,27 @@ export default function DashboardScreen() {
                 <ActivityIndicator size="large" color="#a78bfa" />
                 <Text style={styles.loadingText}>Carregando painel...</Text>
               </View>
+            ) : loadError ? (
+              <View style={[styles.emptyStateContainer, isMobile && { padding: 20 }]}>
+                <View style={[styles.emptyStateIconBox, { backgroundColor: 'rgba(239, 68, 68, 0.1)' }]}>
+                  <Ionicons name="alert-circle-outline" size={32} color="#ef4444" />
+                </View>
+                <Text style={[styles.emptyStateTitle, { color: '#ef4444' }, isMobile && { fontSize: 20, textAlign: 'center' }]}>
+                  Erro ao carregar sessões
+                </Text>
+                <Text style={styles.emptyStateDesc}>{loadError}</Text>
+                <TouchableOpacity
+                  style={[styles.saveButton, { marginTop: 16 }]}
+                  onPress={() => {
+                    setLoadError(null);
+                    setLoadingSessions(true);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="refresh-outline" size={16} color="#e8e6f0" />
+                  <Text style={styles.saveButtonText}>Tentar novamente</Text>
+                </TouchableOpacity>
+              </View>
             ) : recentSessions.length === 0 ? (
               <View style={[styles.emptyStateContainer, isMobile && { padding: 20 }]}>
                 <View style={styles.emptyStateIconBox}><Ionicons name="folder-open-outline" size={32} color="#a78bfa" /></View>
@@ -306,17 +389,30 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {allFiltered.length === 0 ? (
-                <View style={[styles.emptyStateContainer, { marginTop: 40 }]}>
-                  <Ionicons name="search-outline" size={48} color="#5a5872" style={{marginBottom: 16}} />
-                  <Text style={styles.emptyStateTitle}>Nenhum resultado</Text>
-                  <Text style={styles.emptyStateDesc}>Não existem sessões que correspondam aos filtros selecionados.</Text>
-                </View>
-              ) : (
-                <View style={styles.gridContainer}>{allFiltered.map(renderSessionCard)}</View>
-              )}
-            </ScrollView>
+            {loadingSessions ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#a78bfa" />
+                <Text style={styles.loadingText}>Carregando sessões...</Text>
+              </View>
+            ) : loadError ? (
+              <View style={[styles.emptyStateContainer, { marginTop: 40 }]}>
+                <Ionicons name="alert-circle-outline" size={48} color="#ef4444" style={{ marginBottom: 16 }} />
+                <Text style={[styles.emptyStateTitle, { color: '#ef4444' }]}>Erro ao carregar sessões</Text>
+                <Text style={styles.emptyStateDesc}>{loadError}</Text>
+              </View>
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {allFiltered.length === 0 ? (
+                  <View style={[styles.emptyStateContainer, { marginTop: 40 }]}>
+                    <Ionicons name="search-outline" size={48} color="#5a5872" style={{marginBottom: 16}} />
+                    <Text style={styles.emptyStateTitle}>Nenhum resultado</Text>
+                    <Text style={styles.emptyStateDesc}>Não existem sessões que correspondam aos filtros selecionados.</Text>
+                  </View>
+                ) : (
+                  <View style={styles.gridContainer}>{allFiltered.map(renderSessionCard)}</View>
+                )}
+              </ScrollView>
+            )}
           </>
         );
 
