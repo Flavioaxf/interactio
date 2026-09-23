@@ -63,10 +63,32 @@ export default function StudioScreen() {
         const snapshot = await get(ref(db, `sessions/${sessionId}`));
         const data = snapshot.val();
 
-        if (data && data.interactions && Array.isArray(data.interactions)) {
+        if (data && data.interactions && Array.isArray(data.interactions) && data.interactions.length > 0) {
           setSlides(data.interactions);
           setLiveIndex(data.currentInteraction || 0);
           setIsLive(data.status === 'active');
+        } else if (data && data.cards && typeof data.cards === 'object') {
+          const cardEntries = Object.entries(data.cards);
+          if (cardEntries.length > 0) {
+            const convertedSlides: Slide[] = cardEntries.map(([cid, card]: [string, any]) => ({
+              id: cid,
+              type: card?.type || 'multiple_choice',
+              question: card?.question || '',
+              options: card?.options ? Object.values(card.options).map((o: any) => o?.text || '') : ['', ''],
+              limit: card?.config?.maxWordsPerUser || 3,
+            }));
+            setSlides(convertedSlides);
+            setLiveIndex(0);
+            setIsLive(data.meta?.status === 'active');
+          } else {
+            setSlides([{
+              id: `slide_${Date.now()}`,
+              type: 'multiple_choice',
+              question: '',
+              options: ['', ''],
+              limit: 3
+            }]);
+          }
         } else {
           setSlides([{
             id: `slide_${Date.now()}`,
@@ -78,6 +100,13 @@ export default function StudioScreen() {
         }
       } catch (err) {
         showToast("Erro ao carregar dados da sessão.");
+        setSlides([{
+          id: `slide_${Date.now()}`,
+          type: 'multiple_choice',
+          question: '',
+          options: ['', ''],
+          limit: 3
+        }]);
       } finally {
         setLoading(false);
       }
@@ -106,14 +135,16 @@ export default function StudioScreen() {
   };
 
   const updateCurrentSlide = (field: keyof Slide, value: any) => {
+    if (!slides[activeIndex]) return;
     const updatedSlides = [...slides];
     updatedSlides[activeIndex] = { ...updatedSlides[activeIndex], [field]: value };
     setSlides(updatedSlides);
   };
 
   const addOption = () => {
-    if (slides[activeIndex].options.length < 6) {
-      updateCurrentSlide('options', [...slides[activeIndex].options, '']);
+    const currentOptions = slides[activeIndex]?.options;
+    if (currentOptions && currentOptions.length < 6) {
+      updateCurrentSlide('options', [...currentOptions, '']);
     }
   };
 
@@ -135,8 +166,8 @@ export default function StudioScreen() {
       const db = getDatabase();
       const cleanSlides = slides.map(slide => ({
         ...slide,
-        options: slide.type === 'multiple_choice' ? slide.options.filter(opt => opt.trim() !== '') : [],
-        limit: slide.type === 'word_cloud' ? (slide.limit || 3) : 1
+        options: slide?.type === 'multiple_choice' ? (slide?.options || []).filter(opt => opt?.trim() !== '') : [],
+        limit: slide?.type === 'word_cloud' ? (slide?.limit || 3) : 1
       }));
 
       // AQUI É A CORREÇÃO: Enviamos o userId junto com os outros dados da sessão
@@ -158,7 +189,7 @@ export default function StudioScreen() {
   const handleSaveAndPresent = async () => {
     if (isMobile) return; 
 
-    const emptySlideIndex = slides.findIndex(s => s.question.trim() === '');
+    const emptySlideIndex = slides.findIndex(s => !s?.question || s.question.trim() === '');
     if (emptySlideIndex !== -1) {
       setActiveIndex(emptySlideIndex);
       return showToast(`O Slide ${emptySlideIndex + 1} está sem pergunta.`);
@@ -173,8 +204,8 @@ export default function StudioScreen() {
       const db = getDatabase();
       const cleanSlides = slides.map(slide => ({
         ...slide,
-        options: slide.type === 'multiple_choice' ? slide.options.filter(opt => opt.trim() !== '') : [],
-        limit: slide.type === 'word_cloud' ? (slide.limit || 3) : 1
+        options: slide?.type === 'multiple_choice' ? (slide?.options || []).filter(opt => opt?.trim() !== '') : [],
+        limit: slide?.type === 'word_cloud' ? (slide?.limit || 3) : 1
       }));
 
       // AQUI É A CORREÇÃO: Enviamos o userId aqui também
@@ -202,12 +233,12 @@ export default function StudioScreen() {
     </View>
   );
 
-  const activeSlide = slides[activeIndex];
+  const activeSlide = slides[activeIndex] || slides[0];
 
   const renderSlideList = () => (
     <ScrollView 
       horizontal={isMobile} 
-      showsHorizontalScrollIndicator={false}
+      showsHorizontalScrollIndicator={false} 
       showsVerticalScrollIndicator={false} 
       contentContainerStyle={isMobile ? styles.mobileSlideList : styles.desktopSlideList}
     >
@@ -231,9 +262,9 @@ export default function StudioScreen() {
             )}
           </View>
           <View style={styles.slidePreview}>
-            <Ionicons name={slide.type === 'multiple_choice' ? 'bar-chart' : slide.type === 'word_cloud' ? 'cloud' : 'chatbubbles'} size={20} color={activeIndex === index ? '#a78bfa' : '#5a5872'} />
+            <Ionicons name={slide?.type === 'multiple_choice' ? 'bar-chart' : slide?.type === 'word_cloud' ? 'cloud' : 'chatbubbles'} size={20} color={activeIndex === index ? '#a78bfa' : '#5a5872'} />
             <Text style={styles.slidePreviewText} numberOfLines={isMobile ? 1 : 2}>
-              {slide.question || "Digite sua pergunta..."}
+              {slide?.question || "Digite sua pergunta..."}
             </Text>
           </View>
         </TouchableOpacity>
@@ -313,79 +344,89 @@ export default function StudioScreen() {
           <View style={[styles.bgGlow, { bottom: -100, right: -50, backgroundColor: 'rgba(56, 189, 248, 0.08)' }]} />
 
           <ScrollView contentContainerStyle={[styles.editorScroll, isMobile && { padding: 20 }]} showsVerticalScrollIndicator={false}>
-            <View style={[styles.card, isMobile && { padding: 24, borderRadius: 24 }]}>
-              
-              <View style={[styles.tabsContainer, isMobile && { flexDirection: 'column', gap: 8 }]}>
-                <TouchableOpacity style={[styles.tab, activeSlide.type === 'multiple_choice' && styles.tabActiveMultipleChoice]} onPress={() => updateCurrentSlide('type', 'multiple_choice')} activeOpacity={0.7}>
-                  <View style={[styles.iconBox, { backgroundColor: activeSlide.type === 'multiple_choice' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255,255,255,0.05)' }]}><Ionicons name="bar-chart" size={16} color={activeSlide.type === 'multiple_choice' ? '#38bdf8' : '#8b89a0'} /></View>
-                  <Text style={[styles.tabText, activeSlide.type === 'multiple_choice' && { color: '#e8e6f0' }]}>Múltipla Escolha</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={[styles.tab, activeSlide.type === 'word_cloud' && styles.tabActiveWordCloud]} onPress={() => updateCurrentSlide('type', 'word_cloud')} activeOpacity={0.7}>
-                  <View style={[styles.iconBox, { backgroundColor: activeSlide.type === 'word_cloud' ? 'rgba(244, 114, 182, 0.15)' : 'rgba(255,255,255,0.05)' }]}><Ionicons name="cloud" size={16} color={activeSlide.type === 'word_cloud' ? '#f472b6' : '#8b89a0'} /></View>
-                  <Text style={[styles.tabText, activeSlide.type === 'word_cloud' && { color: '#e8e6f0' }]}>Nuvem de Palavras</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={[styles.tab, activeSlide.type === 'q_and_a' && styles.tabActiveQA]} onPress={() => updateCurrentSlide('type', 'q_and_a')} activeOpacity={0.7}>
-                  <View style={[styles.iconBox, { backgroundColor: activeSlide.type === 'q_and_a' ? 'rgba(52, 211, 153, 0.15)' : 'rgba(255,255,255,0.05)' }]}><Ionicons name="chatbubbles" size={16} color={activeSlide.type === 'q_and_a' ? '#34d399' : '#8b89a0'} /></View>
-                  <Text style={[styles.tabText, activeSlide.type === 'q_and_a' && { color: '#e8e6f0' }]}>Q&A</Text>
+            {!activeSlide ? (
+              <View style={[styles.card, { alignItems: 'center', justifyContent: 'center', padding: 40 }]}>
+                <Ionicons name="document-text-outline" size={48} color="#5a5872" />
+                <Text style={{ color: '#8b89a0', fontSize: 16, marginTop: 12, marginBottom: 20 }}>Nenhum slide disponível.</Text>
+                <TouchableOpacity style={styles.presentButton} onPress={addNewSlide} activeOpacity={0.8}>
+                  <Text style={styles.presentButtonText}>Criar Primeiro Slide</Text>
                 </TouchableOpacity>
               </View>
+            ) : (
+              <View style={[styles.card, isMobile && { padding: 24, borderRadius: 24 }]}>
+                
+                <View style={[styles.tabsContainer, isMobile && { flexDirection: 'column', gap: 8 }]}>
+                  <TouchableOpacity style={[styles.tab, activeSlide?.type === 'multiple_choice' && styles.tabActiveMultipleChoice]} onPress={() => updateCurrentSlide('type', 'multiple_choice')} activeOpacity={0.7}>
+                    <View style={[styles.iconBox, { backgroundColor: activeSlide?.type === 'multiple_choice' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255,255,255,0.05)' }]}><Ionicons name="bar-chart" size={16} color={activeSlide?.type === 'multiple_choice' ? '#38bdf8' : '#8b89a0'} /></View>
+                    <Text style={[styles.tabText, activeSlide?.type === 'multiple_choice' && { color: '#e8e6f0' }]}>Múltipla Escolha</Text>
+                  </TouchableOpacity>
 
-              <View style={styles.section}>
-                <Text style={styles.label}>O QUE VOCÊ QUER PERGUNTAR?</Text>
-                <TextInput style={styles.textArea} placeholder="Ex: Como você descreve a cultura da empresa?" placeholderTextColor="#5a5872" multiline value={activeSlide.question} onChangeText={(text) => updateCurrentSlide('question', text)} />
-              </View>
+                  <TouchableOpacity style={[styles.tab, activeSlide?.type === 'word_cloud' && styles.tabActiveWordCloud]} onPress={() => updateCurrentSlide('type', 'word_cloud')} activeOpacity={0.7}>
+                    <View style={[styles.iconBox, { backgroundColor: activeSlide?.type === 'word_cloud' ? 'rgba(244, 114, 182, 0.15)' : 'rgba(255,255,255,0.05)' }]}><Ionicons name="cloud" size={16} color={activeSlide?.type === 'word_cloud' ? '#f472b6' : '#8b89a0'} /></View>
+                    <Text style={[styles.tabText, activeSlide?.type === 'word_cloud' && { color: '#e8e6f0' }]}>Nuvem de Palavras</Text>
+                  </TouchableOpacity>
 
-              {activeSlide.type === 'multiple_choice' && (
-                <View style={styles.section}>
-                  <Text style={styles.label}>OPÇÕES DE RESPOSTA</Text>
-                  {activeSlide.options.map((opt, index) => (
-                    <View key={index} style={styles.optionRow}>
-                      <View style={styles.optionLetterBox}><Text style={styles.optionLetterText}>{getOptionLetter(index)}</Text></View>
-                      <TextInput style={styles.optionInput} placeholder={`Opção ${getOptionLetter(index)}`} placeholderTextColor="#5a5872" value={opt} onChangeText={(text) => { const updatedOptions = [...activeSlide.options]; updatedOptions[index] = text; updateCurrentSlide('options', updatedOptions); }} />
-                    </View>
-                  ))}
-                  {activeSlide.options.length < 6 && (
-                    <TouchableOpacity style={styles.addOptionButton} onPress={addOption} activeOpacity={0.6}>
-                      <Ionicons name="add" size={18} color="#a78bfa" />
-                      <Text style={styles.addOptionText}>Adicionar opção (Máx. 6)</Text>
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity style={[styles.tab, activeSlide?.type === 'q_and_a' && styles.tabActiveQA]} onPress={() => updateCurrentSlide('type', 'q_and_a')} activeOpacity={0.7}>
+                    <View style={[styles.iconBox, { backgroundColor: activeSlide?.type === 'q_and_a' ? 'rgba(52, 211, 153, 0.15)' : 'rgba(255,255,255,0.05)' }]}><Ionicons name="chatbubbles" size={16} color={activeSlide?.type === 'q_and_a' ? '#34d399' : '#8b89a0'} /></View>
+                    <Text style={[styles.tabText, activeSlide?.type === 'q_and_a' && { color: '#e8e6f0' }]}>Q&A</Text>
+                  </TouchableOpacity>
                 </View>
-              )}
 
-              {activeSlide.type === 'word_cloud' && (
                 <View style={styles.section}>
-                  <Text style={[styles.label, { color: '#f472b6' }]}>RESPOSTAS POR PARTICIPANTE</Text>
-                  <View style={[styles.limitRow, isMobile && { flexWrap: 'wrap' }]}>
-                    {[1, 3, 5, 'unlimited'].map((limitValue) => {
-                      const currentLimit = activeSlide.limit || 3;
-                      const isActive = currentLimit === limitValue;
-                      return (
-                        <TouchableOpacity key={limitValue.toString()} style={[styles.limitButton, isMobile && { minWidth: '45%' }, isActive && styles.limitButtonActive]} onPress={() => updateCurrentSlide('limit', limitValue)} activeOpacity={0.7}>
-                          <Text style={[styles.limitButtonText, isActive && styles.limitButtonTextActive]}>{limitValue === 'unlimited' ? 'Ilimitado' : limitValue}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
+                  <Text style={styles.label}>O QUE VOCÊ QUER PERGUNTAR?</Text>
+                  <TextInput style={styles.textArea} placeholder="Ex: Como você descreve a cultura da empresa?" placeholderTextColor="#5a5872" multiline value={activeSlide?.question ?? ''} onChangeText={(text) => updateCurrentSlide('question', text)} />
+                </View>
+
+                {activeSlide?.type === 'multiple_choice' && (
+                  <View style={styles.section}>
+                    <Text style={styles.label}>OPÇÕES DE RESPOSTA</Text>
+                    {(activeSlide?.options ?? []).map((opt, index) => (
+                      <View key={index} style={styles.optionRow}>
+                        <View style={styles.optionLetterBox}><Text style={styles.optionLetterText}>{getOptionLetter(index)}</Text></View>
+                        <TextInput style={styles.optionInput} placeholder={`Opção ${getOptionLetter(index)}`} placeholderTextColor="#5a5872" value={opt} onChangeText={(text) => { const currentOpts = activeSlide?.options ? [...activeSlide.options] : []; currentOpts[index] = text; updateCurrentSlide('options', currentOpts); }} />
+                      </View>
+                    ))}
+                    {(activeSlide?.options?.length ?? 0) < 6 && (
+                      <TouchableOpacity style={styles.addOptionButton} onPress={addOption} activeOpacity={0.6}>
+                        <Ionicons name="add" size={18} color="#a78bfa" />
+                        <Text style={styles.addOptionText}>Adicionar opção (Máx. 6)</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
-                </View>
-              )}
+                )}
 
-              {activeSlide.type === 'word_cloud' && (
-                <View style={[styles.infoBox, { borderColor: 'rgba(244, 114, 182, 0.2)' }, isMobile && { flexDirection: 'column', alignItems: 'flex-start', gap: 8 }]}>
-                  <Ionicons name="information-circle-outline" size={24} color="#f472b6" />
-                  <Text style={styles.infoText}>Neste formato, o público envia palavras curtas. Termos repetidos ganharão destaque automático no telão.</Text>
-                </View>
-              )}
-              {activeSlide.type === 'q_and_a' && (
-                <View style={[styles.infoBox, { borderColor: 'rgba(52, 211, 153, 0.2)' }, isMobile && { flexDirection: 'column', alignItems: 'flex-start', gap: 8 }]}>
-                  <Ionicons name="information-circle-outline" size={24} color="#34d399" />
-                  <Text style={styles.infoText}>Neste formato, o público envia perguntas abertas e pode votar nas melhores dúvidas dos colegas.</Text>
-                </View>
-              )}
+                {activeSlide?.type === 'word_cloud' && (
+                  <View style={styles.section}>
+                    <Text style={[styles.label, { color: '#f472b6' }]}>RESPOSTAS POR PARTICIPANTE</Text>
+                    <View style={[styles.limitRow, isMobile && { flexWrap: 'wrap' }]}>
+                      {[1, 3, 5, 'unlimited'].map((limitValue) => {
+                        const currentLimit = activeSlide?.limit || 3;
+                        const isActive = currentLimit === limitValue;
+                        return (
+                          <TouchableOpacity key={limitValue.toString()} style={[styles.limitButton, isMobile && { minWidth: '45%' }, isActive && styles.limitButtonActive]} onPress={() => updateCurrentSlide('limit', limitValue)} activeOpacity={0.7}>
+                            <Text style={[styles.limitButtonText, isActive && styles.limitButtonTextActive]}>{limitValue === 'unlimited' ? 'Ilimitado' : limitValue}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                )}
 
-            </View>
+                {activeSlide?.type === 'word_cloud' && (
+                  <View style={[styles.infoBox, { borderColor: 'rgba(244, 114, 182, 0.2)' }, isMobile && { flexDirection: 'column', alignItems: 'flex-start', gap: 8 }]}>
+                    <Ionicons name="information-circle-outline" size={24} color="#f472b6" />
+                    <Text style={styles.infoText}>Neste formato, o público envia palavras curtas. Termos repetidos ganharão destaque automático no telão.</Text>
+                  </View>
+                )}
+                {activeSlide?.type === 'q_and_a' && (
+                  <View style={[styles.infoBox, { borderColor: 'rgba(52, 211, 153, 0.2)' }, isMobile && { flexDirection: 'column', alignItems: 'flex-start', gap: 8 }]}>
+                    <Ionicons name="information-circle-outline" size={24} color="#34d399" />
+                    <Text style={styles.infoText}>Neste formato, o público envia perguntas abertas e pode votar nas melhores dúvidas dos colegas.</Text>
+                  </View>
+                )}
+
+              </View>
+            )}
           </ScrollView>
         </View>
       </View>
