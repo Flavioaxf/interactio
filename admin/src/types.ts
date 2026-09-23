@@ -181,6 +181,8 @@ export interface WordCloudItem {
 export interface TextProcessorWorkerInput {
   type: 'PROCESS_TEXT' | 'RESET';
   text?: string;
+  minWordLength?: number;
+  maxWords?: number;
 }
 
 /** Mensagens de saída emitidas pelo Web Worker com a contagem atualizada */
