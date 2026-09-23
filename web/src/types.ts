@@ -11,7 +11,8 @@ export type CardType =
   | 'word_cloud'
   | 'open_text'
   | 'rating'
-  | 'quiz';
+  | 'quiz'
+  | 'passive_word_cloud';
 
 export type CardStatus    = 'draft' | 'active' | 'closed';
 export type SessionStatus = 'draft' | 'active' | 'closed';
@@ -151,4 +152,66 @@ export function buildMultipleChoiceCard(params: {
     },
     status: 'draft',
   };
+}
+
+// ─────────────────────────────────────────────
+// Feature: Nuvem de Palavras por Escuta Passiva
+// ─────────────────────────────────────────────
+
+/** Entrada de palavra com contagem de frequência */
+export interface WordFrequency {
+  text: string;
+  count: number;
+}
+
+/** Item de palavra projetado no gráfico animado D3/Canvas */
+export interface WordCloudItem {
+  text: string;
+  count: number;
+  size: number;
+  x?: number;
+  y?: number;
+  vx?: number;
+  vy?: number;
+  color?: string;
+  rotate?: number;
+}
+
+/** Mensagens de entrada enviadas para o Web Worker de processamento de texto */
+export interface TextProcessorWorkerInput {
+  type: 'PROCESS_TEXT' | 'RESET';
+  text?: string;
+}
+
+/** Mensagens de saída emitidas pelo Web Worker com a contagem atualizada */
+export interface TextProcessorWorkerOutput {
+  type: 'WORDS_UPDATED';
+  words: WordFrequency[];
+  totalWords: number;
+}
+
+/** Status do mecanismo de reconhecimento de voz */
+export type PassiveListeningStatus =
+  | 'idle'
+  | 'listening'
+  | 'paused'
+  | 'error'
+  | 'unsupported';
+
+/** Configuração do motor de escuta passiva */
+export interface PassiveListeningConfig {
+  lang?: string;
+  continuous?: boolean;
+  interimResults?: boolean;
+  maxWords?: number;
+  minWordLength?: number;
+}
+
+/** Estado gerenciado pelo hook usePassiveListening */
+export interface PassiveListeningState {
+  status: PassiveListeningStatus;
+  isListening: boolean;
+  transcript: string;
+  words: WordFrequency[];
+  error: string | null;
 }

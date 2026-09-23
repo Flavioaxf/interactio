@@ -1,0 +1,8 @@
+{
+  "name": "@interactio/types",
+  "version": "1.0.0",
+  "description": "Contratos TS e interfaces compartilhadas do Interactio",
+  "main": "index.ts",
+  "types": "index.ts",
+  "private": true
+}
