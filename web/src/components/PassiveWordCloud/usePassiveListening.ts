@@ -102,11 +102,8 @@ export function usePassiveListening(
 
       worker.onmessage = handleMessage;
       worker.addEventListener('message', handleMessage);
-      worker.onerror = (err) => {
-        console.error('❌ Erro no Web Worker:', err);
-      };
-
       workerRef.current = worker;
+      workerRef.current.onerror = (error) => console.error('🚨 Erro crítico no Worker:', error);
     } catch (err) {
       console.warn(
         '[usePassiveListening] Web Worker não pôde ser instanciado diretamente. Usando processamento síncrono como fallback.',
