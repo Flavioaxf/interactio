@@ -53,7 +53,7 @@ export function PassiveWordCloud({
     isListening,
     transcript,
     interimTranscript,
-    words: recognizedWords,
+    words,
     totalWords,
     error,
     toggle,
@@ -67,9 +67,6 @@ export function PassiveWordCloud({
 
   const [showLiveText, setShowLiveText] = useState(showTranscriptPreview);
 
-  // Palavras a serem exibidas: escutadas ativamente ou providas externamente
-  const wordsToDisplay = recognizedWords.length > 0 ? recognizedWords : initialWords ?? [];
-
   // Último trecho de fala capturado para a legenda em tempo real
   const currentSentence = (interimTranscript || transcript.slice(-140)).trim();
 
@@ -77,17 +74,18 @@ export function PassiveWordCloud({
     <div
       className={`relative w-full h-full flex flex-col items-center justify-between select-none ${className}`}
       style={{
-        minHeight: 460,
+        minHeight: '60vh',
         backgroundColor: 'transparent',
         ...style,
       }}
     >
       {/* Área Central: Visualização Canvas com D3 Force */}
-      <div className="relative w-full flex-1 flex items-center justify-center overflow-hidden">
+      <div className="relative w-full min-h-[60vh] flex-1 flex items-center justify-center overflow-hidden">
         <WordCloudGraph
-          words={wordsToDisplay}
+          data={words}
+          words={words}
           maxDisplayWords={maxWords}
-          className="w-full h-full"
+          className="w-full h-full min-h-[60vh]"
         />
 
         {/* Notificação de Erro / Incompatibilidade */}
@@ -141,7 +139,7 @@ export function PassiveWordCloud({
                 : 'Escuta Pausada'}
             </span>
             <span className="text-[11px] text-slate-500 font-mono ml-1 border-l border-slate-700/60 pl-2">
-              {wordsToDisplay.length} termos ({totalWords} falados)
+              {words.length} termos ({totalWords} falados)
             </span>
           </div>
 

@@ -442,7 +442,7 @@ export default function DisplayPage({ params }: PageProps) {
       {/* Resultados por tipo */}
       <div style={display.resultArea}>
         {activeCard.type === 'passive_word_cloud' && (
-          <div style={{ flex: 1, minHeight: 480, display: 'flex' }}>
+          <div style={{ flex: 1, minHeight: '60vh', display: 'flex', width: '100%' }}>
             <PassiveWordCloud />
           </div>
         )}

@@ -15,7 +15,9 @@ import type { WordFrequency } from '../../types';
 
 export interface WordCloudGraphProps {
   /** Lista de palavras com suas frequências */
-  words: WordFrequency[];
+  data?: WordFrequency[];
+  /** Alias para retrocompatibilidade */
+  words?: WordFrequency[];
   /** Largura personalizada (opcional, padrão: 100% do container) */
   width?: number;
   /** Altura personalizada (opcional, padrão: 100% do container) */
@@ -67,7 +69,8 @@ const DEFAULT_PALETTE = [
 ];
 
 export function WordCloudGraph({
-  words,
+  data,
+  words: wordsProp,
   width: customWidth,
   height: customHeight,
   minFontSize = 20,
@@ -78,6 +81,7 @@ export function WordCloudGraph({
   className = '',
   style = {},
 }: WordCloudGraphProps) {
+  const words = useMemo(() => data ?? wordsProp ?? [], [data, wordsProp]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -352,8 +356,8 @@ export function WordCloudGraph({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full flex items-center justify-center overflow-hidden ${className}`}
-      style={{ minHeight: 350, ...style }}
+      className={`relative w-full h-full min-h-[60vh] flex items-center justify-center overflow-hidden ${className}`}
+      style={{ minHeight: 400, ...style }}
     >
       <canvas
         ref={canvasRef}
