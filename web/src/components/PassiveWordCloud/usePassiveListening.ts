@@ -89,20 +89,23 @@ export function usePassiveListening(
     let handleMessage: ((event: MessageEvent<TextProcessorWorkerOutput>) => void) | null = null;
 
     try {
-      worker = new Worker(
-        new URL('./textProcessor.worker.ts', import.meta.url),
-        { type: 'module' }
-      );
+      worker = new Worker(new URL('./textProcessor.worker.ts', import.meta.url));
 
       handleMessage = (event: MessageEvent<TextProcessorWorkerOutput>) => {
         const data = event.data;
+        console.log('⚙️ Worker devolveu:', data);
         if (data && data.type === 'WORDS_UPDATED') {
           setWords(data.words);
           setTotalWords(data.totalWords);
         }
       };
 
+      worker.onmessage = handleMessage;
       worker.addEventListener('message', handleMessage);
+      worker.onerror = (err) => {
+        console.error('❌ Erro no Web Worker:', err);
+      };
+
       workerRef.current = worker;
     } catch (err) {
       console.warn(
@@ -138,10 +141,29 @@ export function usePassiveListening(
             minWordLength,
             maxWords,
           };
-          workerRef.current.postMessage(input);
+          try {
+            workerRef.current.postMessage(input);
+          } catch (postErr) {
+            console.warn('[usePassiveListening] Erro ao comunicar com Worker, usando fallback:', postErr);
+            const result = processText(textToProcess, { minWordLength, maxWords });
+            const data: TextProcessorWorkerOutput = {
+              type: 'WORDS_UPDATED',
+              words: result.words,
+              totalWords: result.totalWords,
+            };
+            console.log('⚙️ Worker devolveu:', data);
+            setWords(result.words);
+            setTotalWords(result.totalWords);
+          }
         } else {
           // Fallback síncrono se worker indisponível
           const result = processText(textToProcess, { minWordLength, maxWords });
+          const data: TextProcessorWorkerOutput = {
+            type: 'WORDS_UPDATED',
+            words: result.words,
+            totalWords: result.totalWords,
+          };
+          console.log('⚙️ Worker devolveu:', data);
           setWords(result.words);
           setTotalWords(result.totalWords);
         }
@@ -170,6 +192,32 @@ export function usePassiveListening(
     recognition.lang = lang;
     recognitionRef.current = recognition;
 
+    const startRecognitionSafely = () => {
+      if (!shouldListenRef.current || !recognitionRef.current) return;
+      try {
+        recognitionRef.current.start();
+        setIsListening(true);
+        setStatus('listening');
+        setError(null);
+      } catch (err: any) {
+        // Se a API estiver em transição ou colisão de estado, agenda retry
+        if (shouldListenRef.current) {
+          if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+          restartTimerRef.current = setTimeout(() => {
+            if (shouldListenRef.current && recognitionRef.current) {
+              try {
+                recognitionRef.current.start();
+                setIsListening(true);
+                setStatus('listening');
+              } catch (e) {
+                // Já ativo
+              }
+            }
+          }, 200);
+        }
+      }
+    };
+
     recognition.onstart = () => {
       setIsListening(true);
       setStatus('listening');
@@ -193,31 +241,24 @@ export function usePassiveListening(
       }
 
       if (errType === 'network') {
-        setError('Falha de conexão com o serviço de reconhecimento de voz.');
+        setError('Falha de conexão com o serviço de reconhecimento de voz. Tentando reconectar...');
       } else {
-        setError(`Erro no reconhecimento: ${errType}`);
+        console.warn('[usePassiveListening] Aviso no reconhecimento de voz:', errType);
       }
     };
 
     recognition.onend = () => {
-      setIsListening(false);
-
-      // Se a intenção do usuário ainda for escutar, reinicia automaticamente
+      // Força o reinício da escuta automaticamente enquanto o estado indicar que deve continuar a escutar
       if (shouldListenRef.current) {
         if (restartTimerRef.current) {
           clearTimeout(restartTimerRef.current);
         }
 
         restartTimerRef.current = setTimeout(() => {
-          if (shouldListenRef.current && recognitionRef.current) {
-            try {
-              recognitionRef.current.start();
-            } catch (e) {
-              // Se já estiver iniciando ou ativo, ignora a colisão
-            }
-          }
-        }, 200);
+          startRecognitionSafely();
+        }, 100);
       } else {
+        setIsListening(false);
         setStatus('idle');
       }
     };
@@ -241,16 +282,13 @@ export function usePassiveListening(
       setInterimTranscript(currentInterim);
 
       const combinedText = (fullAccumulated + ' ' + currentInterim).trim();
+      console.log('🗣️ Voz captada:', combinedText);
       dispatchProcessText(combinedText);
     };
 
     if (autoStart) {
       shouldListenRef.current = true;
-      try {
-        recognition.start();
-      } catch (e) {
-        // Ignora erro inicial de chamada
-      }
+      startRecognitionSafely();
     }
 
     return () => {

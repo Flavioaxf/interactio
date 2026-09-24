@@ -87,7 +87,7 @@ if (
   typeof (self as any).addEventListener === 'function' &&
   typeof (self as any).postMessage === 'function'
 ) {
-  (self as any).addEventListener('message', (event: MessageEvent<TextProcessorWorkerInput>) => {
+  const handleWorkerMessage = (event: MessageEvent<TextProcessorWorkerInput>) => {
     const data = event.data;
     if (!data) return;
 
@@ -123,6 +123,9 @@ if (
       default:
         break;
     }
-  });
+  };
+
+  (self as any).addEventListener('message', handleWorkerMessage);
+  (self as any).onmessage = handleWorkerMessage;
 }
 

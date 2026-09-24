@@ -443,7 +443,7 @@ export default function DisplayPage({ params }: PageProps) {
       <div style={display.resultArea}>
         {activeCard.type === 'passive_word_cloud' && (
           <div style={{ flex: 1, minHeight: 480, display: 'flex' }}>
-            <PassiveWordCloud question={activeCard.question} />
+            <PassiveWordCloud />
           </div>
         )}
         {(activeCard.type === 'multiple_choice' || activeCard.type === 'quiz') && (

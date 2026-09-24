@@ -82,15 +82,6 @@ export function PassiveWordCloud({
         ...style,
       }}
     >
-      {/* Pergunta / Cabeçalho opcional */}
-      {question && (
-        <div className="w-full text-center mb-2 px-6 z-10">
-          <h2 className="text-2xl md:text-4xl font-extrabold text-slate-100 tracking-tight">
-            {question}
-          </h2>
-        </div>
-      )}
-
       {/* Área Central: Visualização Canvas com D3 Force */}
       <div className="relative w-full flex-1 flex items-center justify-center overflow-hidden">
         <WordCloudGraph
