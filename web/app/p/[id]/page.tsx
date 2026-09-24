@@ -181,6 +181,7 @@ export default function ParticipantSession() {
   const typeWordCloud = rawType === 'word_cloud';
   const typeMultipleChoice = rawType === 'multiple_choice';
   const typeQnA = rawType === 'qna' || rawType === 'q_and_a'; 
+  const typePassiveWordCloud = rawType === 'passive_word_cloud';
   
   const isMultipleChoiceVoted = typeMultipleChoice && myResponse !== null;
   const wordLimit = currentInteraction?.limit || 3;
@@ -191,6 +192,7 @@ export default function ParticipantSession() {
     if (currentInteraction?.question && currentInteraction.question.trim() !== '') {
       return currentInteraction.question;
     }
+    if (typePassiveWordCloud) return 'Escuta de Palco';
     if (typeQnA) return 'Espaço de Resposta Aberta';
     if (typeWordCloud) return 'Envie suas palavras';
     if (typeMultipleChoice) return 'Escolha uma opção';
@@ -226,6 +228,19 @@ export default function ParticipantSession() {
           <h2 className="text-[#e8e6f0] text-xl sm:text-4xl font-black leading-snug mb-6 sm:mb-8 tracking-tight text-center">
             {getDisplayTitle()}
           </h2>
+
+          {typePassiveWordCloud && (
+            <div className="flex flex-col items-center text-center py-8 px-4 animate-in fade-in zoom-in duration-500">
+              <div className="w-20 h-20 rounded-full bg-[#a78bfa]/10 flex items-center justify-center mb-5 border border-[#a78bfa]/30 shadow-[0_0_25px_rgba(167,139,250,0.2)]">
+                <svg className="w-9 h-9 text-[#a78bfa]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+              </div>
+              <p className="text-[#8b89a0] text-base sm:text-lg leading-relaxed max-w-md">
+                Acompanhe pelo telão. O áudio do palco está a ser processado.
+              </p>
+            </div>
+          )}
 
           {typeMultipleChoice && (
             isMultipleChoiceVoted ? (

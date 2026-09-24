@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo, use } from 'react';
-import { listenActiveCard, listenResponses, listenSession } from '../../../src/firebase';
+import { db } from '../../../src/firebase';
+import { ref, onValue } from 'firebase/database';
 import type { Card, CardMap, Response, SessionMeta } from '../../../src/types';
 import { PassiveWordCloud, WordCloudGraph } from '../../../src/components/PassiveWordCloud';
 
@@ -28,51 +29,192 @@ interface WordEntry {
 // ─────────────────────────────────────────────
 
 function useDisplaySession(sessionId: string) {
-  const [meta,          setMeta]          = useState<SessionMeta | null>(null);
-  const [cards,         setCards]         = useState<CardMap>({});
-  const [activeCardId,  setActiveCardId]  = useState<string | null>(null);
-  const [responses,     setResponses]     = useState<Record<string, Response>>({});
+  const [meta, setMeta] = useState<SessionMeta | null>(null);
+  const [activeCard, setActiveCard] = useState<Card | null>(null);
+  const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [responses, setResponses] = useState<Record<string, Response>>({});
   const [totalAnswered, setTotalAnswered] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const unsubSessionRef   = useRef<(() => void) | null>(null);
-  const unsubActiveRef    = useRef<(() => void) | null>(null);
-  const unsubResponsesRef = useRef<(() => void) | null>(null);
-
-  // 1. Ouve a estrutura da sessão (meta + cards)
   useEffect(() => {
-    unsubSessionRef.current = listenSession(sessionId, session => {
-      if (!session) return;
-      setMeta(session.meta);
-      setCards(session.cards ?? {});
-    });
-    return () => unsubSessionRef.current?.();
-  }, [sessionId]);
+    if (!sessionId) {
+      setIsLoading(false);
+      return;
+    }
 
-  // 2. Ouve qual card está ativo
-  useEffect(() => {
-    unsubActiveRef.current = listenActiveCard(sessionId, cardId => {
-      setActiveCardId(cardId);
-      setResponses({});  // zera ao trocar de card
+    const upperId = sessionId.toUpperCase();
+    const sessionRef = ref(db, `sessions/${upperId}`);
+    const fallbackRef = ref(db, `interactio/sessions/${upperId}`);
+
+    // Timeout de segurança para garantir que o loading nunca fique infinito
+    const safetyTimeout = setTimeout(() => {
+      setIsLoading(false);
+    }, 3500);
+
+    const parseSessionData = (data: any) => {
+      if (!data) return false;
+
+      // Formato padrão do Admin (Studio e Live Control): array interactions + currentInteraction
+      if (data.interactions && Array.isArray(data.interactions)) {
+        const currentIndex = typeof data.currentInteraction === 'number' ? data.currentInteraction : 0;
+        const currentInteraction = data.interactions[currentIndex];
+
+        const sessionMeta: SessionMeta = {
+          title: data.title || data.meta?.title || 'Interactio Apresentação',
+          code: data.code || data.meta?.code || upperId,
+          hostId: data.userId || data.meta?.hostId || '',
+          createdAt: data.createdAt || data.meta?.createdAt || Date.now(),
+          status: data.status || data.meta?.status || 'active',
+        };
+        setMeta(sessionMeta);
+        setActiveCardId(currentInteraction?.id || `slide_${currentIndex}`);
+
+        if (currentInteraction) {
+          let normalizedOptions: any = null;
+          if (Array.isArray(currentInteraction.options)) {
+            normalizedOptions = {};
+            currentInteraction.options.forEach((optText: string, idx: number) => {
+              const key = `opt_${String.fromCharCode(97 + idx)}`;
+              normalizedOptions[key] = { order: idx + 1, text: optText };
+            });
+          } else if (currentInteraction.options && typeof currentInteraction.options === 'object') {
+            normalizedOptions = currentInteraction.options;
+          }
+
+          const card: Card = {
+            order: currentIndex + 1,
+            type: currentInteraction.type as any,
+            question: currentInteraction.question ?? '',
+            options: normalizedOptions,
+            config: {
+              timer: 0,
+              anonymous: true,
+              maxWordsPerUser: currentInteraction.limit === 'unlimited' ? 99 : (typeof currentInteraction.limit === 'number' ? currentInteraction.limit : 3),
+            },
+            status: 'active',
+          };
+          setActiveCard(card);
+
+          // Normaliza respostas
+          const rawResponses = data.responses?.[currentIndex] ?? {};
+          const mappedResponses: Record<string, Response> = {};
+          let answeredCount = 0;
+
+          Object.entries(rawResponses).forEach(([uid, val]) => {
+            answeredCount++;
+            let resVal: string | string[] = '';
+            if (typeof val === 'number') {
+              resVal = `opt_${String.fromCharCode(97 + val)}`;
+            } else if (typeof val === 'string' || Array.isArray(val)) {
+              resVal = val as any;
+            }
+            mappedResponses[uid] = {
+              value: resVal,
+              answeredAt: Date.now(),
+            };
+          });
+
+          setResponses(mappedResponses);
+          setTotalAnswered(answeredCount);
+        } else {
+          setActiveCard(null);
+          setResponses({});
+          setTotalAnswered(0);
+        }
+        return true;
+      }
+
+      // Formato alternativo legado: cards map + activeCardId
+      if (data.cards && typeof data.cards === 'object') {
+        const sessionMeta: SessionMeta = {
+          title: data.meta?.title || 'Interactio Apresentação',
+          code: data.meta?.code || upperId,
+          hostId: data.meta?.hostId || '',
+          createdAt: data.meta?.createdAt || Date.now(),
+          status: data.meta?.status || 'active',
+        };
+        setMeta(sessionMeta);
+
+        const activeId = data.activeCardId;
+        setActiveCardId(activeId ?? null);
+        const currentCard = activeId ? data.cards[activeId] : null;
+        setActiveCard(currentCard ?? null);
+
+        if (activeId && data.responses?.[activeId]) {
+          const rawResponses = data.responses[activeId];
+          setResponses(rawResponses);
+          setTotalAnswered(Object.keys(rawResponses).length);
+        } else {
+          setResponses({});
+          setTotalAnswered(0);
+        }
+        return true;
+      }
+
+      setMeta({
+        title: data.title || data.meta?.title || 'Interactio Apresentação',
+        code: data.code || data.meta?.code || upperId,
+        hostId: '',
+        createdAt: Date.now(),
+        status: data.status || 'draft',
+      });
+      setActiveCard(null);
+      setResponses({});
       setTotalAnswered(0);
-    });
-    return () => unsubActiveRef.current?.();
+      return true;
+    };
+
+    let unsubFallback: (() => void) | null = null;
+
+    const unsubMain = onValue(
+      sessionRef,
+      (snapshot) => {
+        clearTimeout(safetyTimeout);
+        const data = snapshot.val();
+        if (data) {
+          parseSessionData(data);
+          setIsLoading(false);
+        } else {
+          unsubFallback = onValue(
+            fallbackRef,
+            (fallbackSnap) => {
+              const fallbackData = fallbackSnap.val();
+              if (fallbackData) {
+                parseSessionData(fallbackData);
+              } else {
+                setMeta({
+                  title: 'Aguardando início da apresentação...',
+                  code: upperId,
+                  hostId: '',
+                  createdAt: Date.now(),
+                  status: 'draft',
+                });
+                setActiveCard(null);
+              }
+              setIsLoading(false);
+            },
+            (err) => {
+              console.error('Erro ao buscar no fallback:', err);
+              setIsLoading(false);
+            }
+          );
+        }
+      },
+      (err) => {
+        console.error('Erro ao buscar na sessão principal:', err);
+        clearTimeout(safetyTimeout);
+        setIsLoading(false);
+      }
+    );
+
+    return () => {
+      clearTimeout(safetyTimeout);
+      unsubMain();
+      if (unsubFallback) unsubFallback();
+    };
   }, [sessionId]);
 
-  // 3. Quando activeCardId muda, começa a ouvir as respostas desse card
-  useEffect(() => {
-    unsubResponsesRef.current?.();
-    if (!activeCardId) return;
-
-    unsubResponsesRef.current = listenResponses(sessionId, activeCardId, rawResponses => {
-      setResponses(rawResponses);
-      setTotalAnswered(Object.keys(rawResponses).length);
-    });
-    return () => unsubResponsesRef.current?.();
-  }, [sessionId, activeCardId]);
-
-  const activeCard = activeCardId ? cards[activeCardId] : null;
-
-  return { meta, activeCard, activeCardId, responses, totalAnswered };
+  return { meta, activeCard, activeCardId, responses, totalAnswered, isLoading };
 }
 
 // ─────────────────────────────────────────────
@@ -234,25 +376,37 @@ export default function DisplayPage({ params }: PageProps) {
     ? use(params as Promise<{ id: string }>)
     : (params as { id: string });
   const sessionId = resolvedParams?.id ?? '';
-  const { meta, activeCard, responses, totalAnswered } = useDisplaySession(sessionId);
-  const [isPassiveMode, setIsPassiveMode] = useState(false);
+  const { meta, activeCard, responses, totalAnswered, isLoading } = useDisplaySession(sessionId);
 
   // Calcula dados do gráfico somente quando responses ou activeCard mudam
-  const tally    = useMemo(() => activeCard?.type === 'multiple_choice' || activeCard?.type === 'quiz'
+  const tally = useMemo(() => activeCard?.type === 'multiple_choice' || activeCard?.type === 'quiz'
     ? tallyMultipleChoice(activeCard, responses)
     : [], [activeCard, responses]);
 
-  const wordData  = useMemo(() => activeCard?.type === 'word_cloud'
+  const wordData = useMemo(() => activeCard?.type === 'word_cloud'
     ? tallyWordCloud(responses)
     : [], [activeCard, responses]);
 
-  // ── Tela de espera ──
+  // ── 1. Estado de Carregamento ──
+  if (isLoading) {
+    return (
+      <div style={display.fullScreen}>
+        <div style={display.waitingState}>
+          <div style={display.sessionCode}>{sessionId.toUpperCase()}</div>
+          <h1 style={display.sessionTitle}>Carregando sessão…</h1>
+          <p style={display.waitingHint}>Conectando ao Interactio em tempo real...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── 2. Tela de espera (quando não há card ativo na sessão) ──
   if (!activeCard) {
     return (
       <div style={display.fullScreen}>
         <div style={display.waitingState}>
-          <div style={display.sessionCode}>{meta?.code}</div>
-          <h1 style={display.sessionTitle}>{meta?.title ?? 'Carregando…'}</h1>
+          <div style={display.sessionCode}>{meta?.code || sessionId.toUpperCase()}</div>
+          <h1 style={display.sessionTitle}>{meta?.title || 'Aguardando o apresentador…'}</h1>
           <p style={display.waitingHint}>
             Entre em <strong style={{ color: '#a78bfa' }}>interactio.app</strong> com o código acima
           </p>
@@ -261,75 +415,48 @@ export default function DisplayPage({ params }: PageProps) {
     );
   }
 
-  // ── Tela de pergunta ativa ──
+  // ── 3. Tela de pergunta/card ativa ──
   return (
     <div style={display.fullScreen}>
       {/* Header com sessão + contador */}
       <div style={display.topBar}>
-        <span style={display.topBarCode}>{meta?.code}</span>
+        <span style={display.topBarCode}>{meta?.code || sessionId.toUpperCase()}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={display.livePill}>
             <div style={display.liveDot} />
             Ao vivo
           </div>
-
-          {/* Alternador de Modo de Escuta para Nuvem de Palavras */}
-          {(activeCard.type === 'word_cloud' || activeCard.type === 'passive_word_cloud') && (
-            <button
-              type="button"
-              onClick={() => setIsPassiveMode((prev) => !prev)}
-              style={{
-                backgroundColor: isPassiveMode || activeCard.type === 'passive_word_cloud' ? 'rgba(167,139,250,0.18)' : 'rgba(255,255,255,0.06)',
-                border: isPassiveMode || activeCard.type === 'passive_word_cloud' ? '1px solid rgba(167,139,250,0.4)' : '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 100,
-                padding: '6px 14px',
-                color: isPassiveMode || activeCard.type === 'passive_word_cloud' ? '#c084fc' : '#8b89a0',
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                transition: 'all 0.2s ease',
-              }}
-            >
-              <svg style={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-              </svg>
-              {isPassiveMode || activeCard.type === 'passive_word_cloud' ? 'Escuta Passiva (Voz)' : 'Respostas Participantes'}
-            </button>
-          )}
         </div>
-        <span style={display.topBarCount}>{totalAnswered} respostas</span>
+        <span style={display.topBarCount}>
+          {activeCard.type === 'passive_word_cloud' ? 'Escuta ativa' : `${totalAnswered} respostas`}
+        </span>
       </div>
 
-      {/* Pergunta */}
-      <h2 style={display.questionHeading}>{activeCard.question}</h2>
+      {/* Pergunta ou Título do Slide */}
+      {activeCard.question ? (
+        <h2 style={display.questionHeading}>{activeCard.question}</h2>
+      ) : activeCard.type === 'passive_word_cloud' ? (
+        <h2 style={display.questionHeading}>Escuta de Palco</h2>
+      ) : null}
 
       {/* Resultados por tipo */}
       <div style={display.resultArea}>
+        {activeCard.type === 'passive_word_cloud' && (
+          <div style={{ flex: 1, minHeight: 480, display: 'flex' }}>
+            <PassiveWordCloud question={activeCard.question} />
+          </div>
+        )}
         {(activeCard.type === 'multiple_choice' || activeCard.type === 'quiz') && (
           <BarChart entries={tally} total={totalAnswered} />
         )}
-        {activeCard.type === 'passive_word_cloud' && (
-          <div style={{ flex: 1, minHeight: 480, display: 'flex' }}>
-            <PassiveWordCloud question="" />
-          </div>
-        )}
         {activeCard.type === 'word_cloud' && (
-          isPassiveMode ? (
-            <div style={{ flex: 1, minHeight: 480, display: 'flex' }}>
-              <PassiveWordCloud question="" />
-            </div>
-          ) : (
-            <div style={{ flex: 1, minHeight: 480, display: 'flex', flexDirection: 'column' }}>
-              <WordCloudGraph
-                words={wordData.map((w) => ({ text: w.word, count: w.count }))}
-                minFontSize={24}
-                maxFontSize={84}
-              />
-            </div>
-          )
+          <div style={{ flex: 1, minHeight: 480, display: 'flex', flexDirection: 'column' }}>
+            <WordCloudGraph
+              words={wordData.map((w) => ({ text: w.word, count: w.count }))}
+              minFontSize={24}
+              maxFontSize={84}
+            />
+          </div>
         )}
         {activeCard.type === 'open_text' && (
           <OpenTextList responses={responses} />
@@ -342,7 +469,7 @@ export default function DisplayPage({ params }: PageProps) {
       {/* Footer com instrução */}
       <div style={display.footer}>
         Acesse <strong style={{ color: '#a78bfa' }}>interactio.app</strong> e use o código{' '}
-        <strong style={{ color: '#a78bfa' }}>{meta?.code}</strong>
+        <strong style={{ color: '#a78bfa' }}>{meta?.code || sessionId.toUpperCase()}</strong>
       </div>
     </div>
   );

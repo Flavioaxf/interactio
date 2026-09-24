@@ -151,7 +151,10 @@ export default function StudioScreen() {
   const getOptionLetter = (index: number) => String.fromCharCode(65 + index);
 
   const handleSaveOnly = async () => {
-    const emptySlideIndex = slides.findIndex(s => s.question.trim() === '');
+    const emptySlideIndex = slides.findIndex(s => {
+      const q = s?.question?.trim();
+      return !q && s?.type !== 'passive_word_cloud';
+    });
     if (emptySlideIndex !== -1) {
       setActiveIndex(emptySlideIndex);
       return showToast(`O Slide ${emptySlideIndex + 1} está sem pergunta.`);
@@ -166,6 +169,7 @@ export default function StudioScreen() {
       const db = getDatabase();
       const cleanSlides = slides.map(slide => ({
         ...slide,
+        question: slide?.question?.trim() || (slide?.type === 'passive_word_cloud' ? 'Escuta de Palco' : ''),
         options: slide?.type === 'multiple_choice' ? (slide?.options || []).filter(opt => opt?.trim() !== '') : [],
         limit: slide?.type === 'word_cloud' ? (slide?.limit || 3) : 1
       }));
@@ -189,7 +193,10 @@ export default function StudioScreen() {
   const handleSaveAndPresent = async () => {
     if (isMobile) return; 
 
-    const emptySlideIndex = slides.findIndex(s => !s?.question || s.question.trim() === '');
+    const emptySlideIndex = slides.findIndex(s => {
+      const q = s?.question?.trim();
+      return !q && s?.type !== 'passive_word_cloud';
+    });
     if (emptySlideIndex !== -1) {
       setActiveIndex(emptySlideIndex);
       return showToast(`O Slide ${emptySlideIndex + 1} está sem pergunta.`);
@@ -204,6 +211,7 @@ export default function StudioScreen() {
       const db = getDatabase();
       const cleanSlides = slides.map(slide => ({
         ...slide,
+        question: slide?.question?.trim() || (slide?.type === 'passive_word_cloud' ? 'Escuta de Palco' : ''),
         options: slide?.type === 'multiple_choice' ? (slide?.options || []).filter(opt => opt?.trim() !== '') : [],
         limit: slide?.type === 'word_cloud' ? (slide?.limit || 3) : 1
       }));
@@ -262,7 +270,7 @@ export default function StudioScreen() {
             )}
           </View>
           <View style={styles.slidePreview}>
-            <Ionicons name={slide?.type === 'multiple_choice' ? 'bar-chart' : slide?.type === 'word_cloud' ? 'cloud' : 'chatbubbles'} size={20} color={activeIndex === index ? '#a78bfa' : '#5a5872'} />
+            <Ionicons name={slide?.type === 'multiple_choice' ? 'bar-chart' : slide?.type === 'word_cloud' ? 'cloud' : slide?.type === 'passive_word_cloud' ? 'mic' : 'chatbubbles'} size={20} color={activeIndex === index ? '#a78bfa' : '#5a5872'} />
             <Text style={styles.slidePreviewText} numberOfLines={isMobile ? 1 : 2}>
               {slide?.question || "Digite sua pergunta..."}
             </Text>
@@ -366,6 +374,11 @@ export default function StudioScreen() {
                     <Text style={[styles.tabText, activeSlide?.type === 'word_cloud' && { color: '#e8e6f0' }]}>Nuvem de Palavras</Text>
                   </TouchableOpacity>
 
+                  <TouchableOpacity style={[styles.tab, activeSlide?.type === 'passive_word_cloud' && styles.tabActivePassive]} onPress={() => updateCurrentSlide('type', 'passive_word_cloud')} activeOpacity={0.7}>
+                    <View style={[styles.iconBox, { backgroundColor: activeSlide?.type === 'passive_word_cloud' ? 'rgba(167, 139, 250, 0.15)' : 'rgba(255,255,255,0.05)' }]}><Ionicons name="mic" size={16} color={activeSlide?.type === 'passive_word_cloud' ? '#a78bfa' : '#8b89a0'} /></View>
+                    <Text style={[styles.tabText, activeSlide?.type === 'passive_word_cloud' && { color: '#e8e6f0' }]}>Escuta de Palco</Text>
+                  </TouchableOpacity>
+
                   <TouchableOpacity style={[styles.tab, activeSlide?.type === 'q_and_a' && styles.tabActiveQA]} onPress={() => updateCurrentSlide('type', 'q_and_a')} activeOpacity={0.7}>
                     <View style={[styles.iconBox, { backgroundColor: activeSlide?.type === 'q_and_a' ? 'rgba(52, 211, 153, 0.15)' : 'rgba(255,255,255,0.05)' }]}><Ionicons name="chatbubbles" size={16} color={activeSlide?.type === 'q_and_a' ? '#34d399' : '#8b89a0'} /></View>
                     <Text style={[styles.tabText, activeSlide?.type === 'q_and_a' && { color: '#e8e6f0' }]}>Q&A</Text>
@@ -373,8 +386,8 @@ export default function StudioScreen() {
                 </View>
 
                 <View style={styles.section}>
-                  <Text style={styles.label}>O QUE VOCÊ QUER PERGUNTAR?</Text>
-                  <TextInput style={styles.textArea} placeholder="Ex: Como você descreve a cultura da empresa?" placeholderTextColor="#5a5872" multiline value={activeSlide?.question ?? ''} onChangeText={(text) => updateCurrentSlide('question', text)} />
+                  <Text style={styles.label}>{activeSlide?.type === 'passive_word_cloud' ? 'TÍTULO DO SLIDE (OPCIONAL)' : 'O QUE VOCÊ QUER PERGUNTAR?'}</Text>
+                  <TextInput style={styles.textArea} placeholder={activeSlide?.type === 'passive_word_cloud' ? "Ex: Tópicos e palavras-chave da palestra" : "Ex: Como você descreve a cultura da empresa?"} placeholderTextColor="#5a5872" multiline value={activeSlide?.question ?? ''} onChangeText={(text) => updateCurrentSlide('question', text)} />
                 </View>
 
                 {activeSlide?.type === 'multiple_choice' && (
@@ -416,6 +429,12 @@ export default function StudioScreen() {
                   <View style={[styles.infoBox, { borderColor: 'rgba(244, 114, 182, 0.2)' }, isMobile && { flexDirection: 'column', alignItems: 'flex-start', gap: 8 }]}>
                     <Ionicons name="information-circle-outline" size={24} color="#f472b6" />
                     <Text style={styles.infoText}>Neste formato, o público envia palavras curtas. Termos repetidos ganharão destaque automático no telão.</Text>
+                  </View>
+                )}
+                {activeSlide?.type === 'passive_word_cloud' && (
+                  <View style={[styles.infoBox, { borderColor: 'rgba(167, 139, 250, 0.2)' }, isMobile && { flexDirection: 'column', alignItems: 'flex-start', gap: 8 }]}>
+                    <Ionicons name="mic-outline" size={24} color="#a78bfa" />
+                    <Text style={styles.infoText}>Escuta de Palco: capta continuamente o áudio do palestrante e projeta uma nuvem de palavras animada em tempo real no telão, sem exigir digitação dos participantes.</Text>
                   </View>
                 )}
                 {activeSlide?.type === 'q_and_a' && (
@@ -467,11 +486,11 @@ const styles = StyleSheet.create({
   editorScroll: { padding: 40, alignItems: 'center', flexGrow: 1, justifyContent: 'center' }, 
   card: { width: '100%', maxWidth: 800, backgroundColor: 'rgba(26, 25, 36, 0.8)', borderRadius: 32, padding: 40, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)', shadowColor: '#000', shadowOffset: { width: 0, height: 20 }, shadowOpacity: 0.4, shadowRadius: 30, backdropFilter: 'blur(20px)' as any },
   
-  tabsContainer: { flexDirection: 'row', gap: 12, marginBottom: 40, flexWrap: 'wrap' }, tab: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.02)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' }, tabActiveMultipleChoice: { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(56, 189, 248, 0.3)' }, tabActiveWordCloud: { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(244, 114, 182, 0.3)' }, tabActiveQA: { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(52, 211, 153, 0.3)' }, iconBox: { width: 32, height: 32, borderRadius: 8, justifyContent: 'center', alignItems: 'center' }, tabText: { color: '#8b89a0', fontWeight: '700', fontSize: 14 }, 
+  tabsContainer: { flexDirection: 'row', gap: 12, marginBottom: 40, flexWrap: 'wrap' }, tab: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.02)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' }, tabActiveMultipleChoice: { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(56, 189, 248, 0.3)' }, tabActiveWordCloud: { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(244, 114, 182, 0.3)' }, tabActivePassive: { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(167, 139, 250, 0.4)' }, tabActiveQA: { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(52, 211, 153, 0.3)' }, iconBox: { width: 32, height: 32, borderRadius: 8, justifyContent: 'center', alignItems: 'center' }, tabText: { color: '#8b89a0', fontWeight: '700', fontSize: 14 }, 
   
-  section: { marginBottom: 32 }, label: { color: '#a78bfa', fontSize: 12, fontWeight: '800', letterSpacing: 1.5, marginBottom: 16 }, textArea: { backgroundColor: '#0f0e17', color: '#e8e6f0', fontSize: 18, borderRadius: 16, padding: 24, minHeight: 120, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)', textAlignVertical: 'top', ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : {}) }, 
+  section: { marginBottom: 32 }, label: { color: '#a78bfa', fontSize: 12, fontWeight: '800', letterSpacing: 1.5, marginBottom: 16 }, textArea: { backgroundColor: '#0f0e17', color: '#e8e6f0', fontSize: 18, borderRadius: 16, padding: 24, minHeight: 120, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)', textAlignVertical: 'top', ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}) }, 
   
-  optionRow: { flexDirection: 'row', marginBottom: 12 }, optionLetterBox: { backgroundColor: 'rgba(167, 139, 250, 0.1)', width: 56, height: 56, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginRight: 12, borderWidth: 1, borderColor: 'rgba(167, 139, 250, 0.15)' }, optionLetterText: { color: '#a78bfa', fontSize: 18, fontWeight: '800' }, optionInput: { flex: 1, backgroundColor: '#0f0e17', color: '#e8e6f0', height: 56, borderRadius: 16, paddingHorizontal: 20, fontSize: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)', ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : {}) }, addOptionButton: { flexDirection: 'row', gap: 8, borderWidth: 1, borderColor: 'rgba(167, 139, 250, 0.3)', borderStyle: 'dashed', borderRadius: 16, height: 56, justifyContent: 'center', alignItems: 'center', marginTop: 8 }, addOptionText: { color: '#a78bfa', fontWeight: '700', fontSize: 15 }, 
+  optionRow: { flexDirection: 'row', marginBottom: 12 }, optionLetterBox: { backgroundColor: 'rgba(167, 139, 250, 0.1)', width: 56, height: 56, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginRight: 12, borderWidth: 1, borderColor: 'rgba(167, 139, 250, 0.15)' }, optionLetterText: { color: '#a78bfa', fontSize: 18, fontWeight: '800' }, optionInput: { flex: 1, backgroundColor: '#0f0e17', color: '#e8e6f0', height: 56, borderRadius: 16, paddingHorizontal: 20, fontSize: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)', ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}) }, addOptionButton: { flexDirection: 'row', gap: 8, borderWidth: 1, borderColor: 'rgba(167, 139, 250, 0.3)', borderStyle: 'dashed', borderRadius: 16, height: 56, justifyContent: 'center', alignItems: 'center', marginTop: 8 }, addOptionText: { color: '#a78bfa', fontWeight: '700', fontSize: 15 }, 
   
   infoBox: { flexDirection: 'row', alignItems: 'center', gap: 16, backgroundColor: 'rgba(255,255,255,0.02)', padding: 24, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)', marginBottom: 16 }, infoText: { flex: 1, color: '#8b89a0', fontSize: 15, lineHeight: 24 },
   

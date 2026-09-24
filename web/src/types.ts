@@ -6,13 +6,15 @@
 // Enums
 // ─────────────────────────────────────────────
 
-export type CardType =
+export type SlideType =
   | 'multiple_choice'
   | 'word_cloud'
   | 'open_text'
   | 'rating'
   | 'quiz'
   | 'passive_word_cloud';
+
+export type CardType = SlideType;
 
 export type CardStatus    = 'draft' | 'active' | 'closed';
 export type SessionStatus = 'draft' | 'active' | 'closed';
