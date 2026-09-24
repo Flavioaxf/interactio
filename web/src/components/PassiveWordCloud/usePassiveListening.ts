@@ -81,18 +81,20 @@ export function usePassiveListening(
   const restartTimerRef = useRef<NodeJS.Timeout | null>(null);
   const dispatchTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Inicializa o Web Worker com fallback síncrono
+  // Inicializa o Web Worker e registra event listeners de forma segura dentro do useEffect (client-side only)
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     let worker: Worker | null = null;
+    let handleMessage: ((event: MessageEvent<TextProcessorWorkerOutput>) => void) | null = null;
+
     try {
       worker = new Worker(
         new URL('./textProcessor.worker.ts', import.meta.url),
         { type: 'module' }
       );
 
-      worker.onmessage = (event: MessageEvent<TextProcessorWorkerOutput>) => {
+      handleMessage = (event: MessageEvent<TextProcessorWorkerOutput>) => {
         const data = event.data;
         if (data && data.type === 'WORDS_UPDATED') {
           setWords(data.words);
@@ -100,6 +102,7 @@ export function usePassiveListening(
         }
       };
 
+      worker.addEventListener('message', handleMessage);
       workerRef.current = worker;
     } catch (err) {
       console.warn(
@@ -110,7 +113,12 @@ export function usePassiveListening(
     }
 
     return () => {
-      worker?.terminate();
+      if (worker) {
+        if (handleMessage) {
+          worker.removeEventListener('message', handleMessage);
+        }
+        worker.terminate();
+      }
       workerRef.current = null;
     };
   }, []);

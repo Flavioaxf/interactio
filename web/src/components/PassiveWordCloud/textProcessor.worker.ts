@@ -78,43 +78,51 @@ export function processText(
 }
 
 // ─────────────────────────────────────────────
-// Listener de mensagens do Web Worker
+// Listener de mensagens do Web Worker (executado estritamente no contexto de Web Worker do navegador, protegido contra SSR)
 // ─────────────────────────────────────────────
 
-self.addEventListener('message', (event: MessageEvent<TextProcessorWorkerInput>) => {
-  const data = event.data;
-  if (!data) return;
+if (
+  typeof self !== 'undefined' &&
+  typeof window === 'undefined' &&
+  typeof (self as any).addEventListener === 'function' &&
+  typeof (self as any).postMessage === 'function'
+) {
+  (self as any).addEventListener('message', (event: MessageEvent<TextProcessorWorkerInput>) => {
+    const data = event.data;
+    if (!data) return;
 
-  switch (data.type) {
-    case 'PROCESS_TEXT': {
-      const text = data.text ?? '';
-      const { words, totalWords } = processText(text, {
-        minWordLength: data.minWordLength,
-        maxWords: data.maxWords,
-      });
+    switch (data.type) {
+      case 'PROCESS_TEXT': {
+        const text = data.text ?? '';
+        const { words, totalWords } = processText(text, {
+          minWordLength: data.minWordLength,
+          maxWords: data.maxWords,
+        });
 
-      const response: TextProcessorWorkerOutput = {
-        type: 'WORDS_UPDATED',
-        words,
-        totalWords,
-      };
+        const response: TextProcessorWorkerOutput = {
+          type: 'WORDS_UPDATED',
+          words,
+          totalWords,
+        };
 
-      self.postMessage(response);
-      break;
+        (self as any).postMessage(response);
+        break;
+      }
+
+      case 'RESET': {
+        const response: TextProcessorWorkerOutput = {
+          type: 'WORDS_UPDATED',
+          words: [],
+          totalWords: 0,
+        };
+
+        (self as any).postMessage(response);
+        break;
+      }
+
+      default:
+        break;
     }
+  });
+}
 
-    case 'RESET': {
-      const response: TextProcessorWorkerOutput = {
-        type: 'WORDS_UPDATED',
-        words: [],
-        totalWords: 0,
-      };
-
-      self.postMessage(response);
-      break;
-    }
-
-    default:
-      break;
-  }
-});

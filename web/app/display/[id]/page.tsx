@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, use } from 'react';
 import { listenActiveCard, listenResponses, listenSession } from '../../../src/firebase';
 import type { Card, CardMap, Response, SessionMeta } from '../../../src/types';
 import { PassiveWordCloud, WordCloudGraph } from '../../../src/components/PassiveWordCloud';
@@ -225,11 +225,16 @@ function OpenTextList({ responses }: { responses: Record<string, Response> }) {
 // ─────────────────────────────────────────────
 
 interface PageProps {
-  params: { id: string };
+  params: Promise<{ id: string }> | { id: string };
 }
 
 export default function DisplayPage({ params }: PageProps) {
-  const { meta, activeCard, responses, totalAnswered } = useDisplaySession(params.id);
+  // Desembrulha a Promise de params usando React.use() conforme Next.js 15+/16
+  const resolvedParams = params && typeof (params as any).then === 'function'
+    ? use(params as Promise<{ id: string }>)
+    : (params as { id: string });
+  const sessionId = resolvedParams?.id ?? '';
+  const { meta, activeCard, responses, totalAnswered } = useDisplaySession(sessionId);
   const [isPassiveMode, setIsPassiveMode] = useState(false);
 
   // Calcula dados do gráfico somente quando responses ou activeCard mudam
