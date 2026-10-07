@@ -505,15 +505,26 @@ export default function DisplayPage({ params }: PageProps) {
         {activeCard.type === 'passive_word_cloud' && (
           <div style={{ flex: 1, minHeight: '65vh', display: 'flex', width: '100%' }}>
             <PassiveWordCloud
-              isRevealed={Boolean(activeCard.isRevealed ?? activeCard.config?.isRevealed)}
+              aiStatus={activeCard.aiStatus ?? 'listening'}
               question={activeCard.question}
-              onWordsUpdated={(words) => {
+              onWordsUpdated={(words, newAiStatus) => {
                 latestWordsRef.current = words;
-                const isRev = Boolean(activeCard?.isRevealed ?? activeCard?.config?.isRevealed);
                 const cardId = activeCard?.id || activeCardId;
-                if (isRev && cardId && sessionId && words.length > 0) {
-                  set(ref(db, `sessions/${sessionId}/interactions/${cardId}/results`), words)
-                    .catch(() => {});
+                if (cardId && sessionId) {
+                  // Se o componente determinou uma transição de estado (ex: após gerar IA)
+                  if (newAiStatus) {
+                    update(ref(db, `sessions/${sessionId}/interactions/${cardId}`), {
+                      results: words,
+                      aiStatus: newAiStatus,
+                      isRevealed: newAiStatus === 'revealed'
+                    }).catch(() => {});
+                  } else {
+                    // Fallback para apenas atualizar as palavras
+                    if (words.length > 0) {
+                      set(ref(db, `sessions/${sessionId}/interactions/${cardId}/results`), words)
+                        .catch(() => {});
+                    }
+                  }
                 }
               }}
             />

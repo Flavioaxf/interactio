@@ -23,6 +23,7 @@ interface Slide {
   options: string[];
   limit?: number | 'unlimited'; 
   isRevealed?: boolean;
+  aiStatus?: 'listening' | 'generating' | 'revealed';
 }
 
 export default function StudioScreen() {
@@ -256,26 +257,30 @@ export default function StudioScreen() {
     }
   };
 
-  const handleRevealPassiveCloud = async (revealState: boolean) => {
+  const handleUpdatePassiveCloud = async (newAiStatus: 'listening' | 'generating' | 'revealed') => {
     if (!sessionId) return;
     setIsRevealing(true);
     try {
+      updateCurrentSlide('aiStatus', newAiStatus);
+      const revealState = newAiStatus === 'revealed';
       updateCurrentSlide('isRevealed', revealState);
 
       const db = getDatabase();
       await update(ref(db, `sessions/${sessionId}/interactions/${activeIndex}`), {
         type: 'passive_word_cloud',
         isRevealed: revealState,
+        aiStatus: newAiStatus,
       });
 
-      showToast(
-        revealState 
-          ? "Nuvem revelada no telão! 🎉" 
-          : "Nuvem ocultada. Modo silencioso reativado.",
-        'success'
-      );
+      if (newAiStatus === 'generating') {
+        showToast("Gerando síntese com IA... O telão exibirá a nuvem em breve.", 'success');
+      } else if (newAiStatus === 'revealed') {
+        showToast("Nuvem revelada no telão! 🎉", 'success');
+      } else {
+        showToast("Modo silencioso reativado (Áudio em background).", 'success');
+      }
     } catch (error) {
-      showToast("Erro ao sincronizar revelação com o telão.");
+      showToast("Erro ao sincronizar com o telão.");
     } finally {
       setIsRevealing(false);
     }
@@ -486,20 +491,23 @@ export default function StudioScreen() {
                     <View style={styles.passiveControlHeader}>
                       <View style={[
                         styles.passiveControlIconBox,
-                        activeSlide?.isRevealed && styles.passiveControlIconBoxRevealed
+                        activeSlide?.aiStatus === 'revealed' ? styles.passiveControlIconBoxRevealed :
+                        activeSlide?.aiStatus === 'generating' ? { backgroundColor: 'rgba(56, 189, 248, 0.2)', borderColor: 'rgba(56, 189, 248, 0.3)' } : undefined
                       ]}>
                         <Ionicons 
-                          name={activeSlide?.isRevealed ? "sparkles" : "mic"} 
+                          name={activeSlide?.aiStatus === 'revealed' ? "sparkles" : activeSlide?.aiStatus === 'generating' ? "analytics" : "mic"} 
                           size={22} 
-                          color={activeSlide?.isRevealed ? "#34d399" : "#a78bfa"} 
+                          color={activeSlide?.aiStatus === 'revealed' ? "#34d399" : activeSlide?.aiStatus === 'generating' ? "#38bdf8" : "#a78bfa"} 
                         />
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.passiveControlTitle}>Controle de Exibição no Telão</Text>
                         <Text style={styles.passiveControlSubtitle}>
-                          {activeSlide?.isRevealed 
+                          {activeSlide?.aiStatus === 'revealed'
                             ? "A nuvem final está visível para a plateia"
-                            : "As palavras estão sendo escutadas em background"}
+                            : activeSlide?.aiStatus === 'generating'
+                            ? "IA extraindo contexto do debate..."
+                            : "Escuta silenciosa em background"}
                         </Text>
                       </View>
                     </View>
@@ -507,44 +515,33 @@ export default function StudioScreen() {
                     {/* Badge de status */}
                     <View style={[
                       styles.passiveStatusBadge,
-                      activeSlide?.isRevealed && styles.passiveStatusBadgeRevealed
+                      activeSlide?.aiStatus === 'revealed' ? styles.passiveStatusBadgeRevealed :
+                      activeSlide?.aiStatus === 'generating' ? { backgroundColor: 'rgba(56, 189, 248, 0.1)', borderColor: 'rgba(56, 189, 248, 0.3)' } : undefined
                     ]}>
                       <View style={[
                         styles.passiveStatusDot,
-                        activeSlide?.isRevealed && styles.passiveStatusDotRevealed
+                        activeSlide?.aiStatus === 'revealed' ? styles.passiveStatusDotRevealed :
+                        activeSlide?.aiStatus === 'generating' ? { backgroundColor: '#38bdf8' } : undefined
                       ]} />
                       <Text style={[
                         styles.passiveStatusText,
-                        activeSlide?.isRevealed && styles.passiveStatusTextRevealed
+                        activeSlide?.aiStatus === 'revealed' ? styles.passiveStatusTextRevealed :
+                        activeSlide?.aiStatus === 'generating' ? { color: '#38bdf8' } : undefined
                       ]}>
-                        {activeSlide?.isRevealed ? "STATUS: NUVEM REVELADA" : "STATUS: MODO SILENCIOSO ATIVO"}
+                        {activeSlide?.aiStatus === 'revealed' ? "FASE 3: NUVEM REVELADA" : activeSlide?.aiStatus === 'generating' ? "FASE 2: GERAÇÃO IA" : "FASE 1: ESCUTA SILENCIOSA"}
                       </Text>
                     </View>
 
                     <Text style={styles.passiveControlDescription}>
-                      {activeSlide?.isRevealed
-                        ? "A nuvem final de palavras está sendo exibida em tela cheia no telão com todas as palavras capturadas e frequências ponderadas."
-                        : "Durante o debate, o telão permanece em tela de espera minimalista e premium sem distrair os palestrantes. O sistema acumula as palavras continuamente."}
+                      {activeSlide?.aiStatus === 'revealed'
+                        ? "A nuvem final de palavras está sendo exibida em tela cheia no telão com os temas gerados pela Inteligência Artificial."
+                        : activeSlide?.aiStatus === 'generating'
+                        ? "Aguarde enquanto a IA processa o transcript e gera a nuvem semântica."
+                        : "Durante o debate, o telão permanece em uma tela de espera. O sistema acumula as falas continuamente no transcript bruto."}
                     </Text>
 
-                    {/* Botão de Destaque 'Revelar Análise Final' */}
-                    {!activeSlide?.isRevealed ? (
-                      <TouchableOpacity
-                        style={styles.revealButton}
-                        onPress={() => handleRevealPassiveCloud(true)}
-                        disabled={isRevealing}
-                        activeOpacity={0.8}
-                      >
-                        {isRevealing ? (
-                          <ActivityIndicator color="#0f0e17" />
-                        ) : (
-                          <>
-                            <Ionicons name="sparkles" size={20} color="#0f0e17" />
-                            <Text style={styles.revealButtonText}>Revelar Análise Final no Telão</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    ) : (
+                    {/* Botão de Ação Principal */}
+                    {activeSlide?.aiStatus === 'revealed' ? (
                       <View style={{ gap: 10 }}>
                         <View style={styles.revealedBanner}>
                           <Ionicons name="checkmark-circle" size={20} color="#34d399" />
@@ -552,14 +549,32 @@ export default function StudioScreen() {
                         </View>
                         <TouchableOpacity
                           style={styles.hideButton}
-                          onPress={() => handleRevealPassiveCloud(false)}
+                          onPress={() => handleUpdatePassiveCloud('listening')}
                           disabled={isRevealing}
                           activeOpacity={0.7}
                         >
                           <Ionicons name="eye-off-outline" size={16} color="#8b89a0" />
-                          <Text style={styles.hideButtonText}>Voltar para Modo Silencioso (Ocultar)</Text>
+                          <Text style={styles.hideButtonText}>Voltar para Modo Silencioso (Reset/Ocultar)</Text>
                         </TouchableOpacity>
                       </View>
+                    ) : (
+                      <TouchableOpacity
+                        style={[styles.revealButton, activeSlide?.aiStatus === 'generating' && { backgroundColor: 'rgba(56, 189, 248, 0.2)' }]}
+                        onPress={() => handleUpdatePassiveCloud('generating')}
+                        disabled={isRevealing || activeSlide?.aiStatus === 'generating'}
+                        activeOpacity={0.8}
+                      >
+                        {isRevealing ? (
+                          <ActivityIndicator color={activeSlide?.aiStatus === 'generating' ? "#38bdf8" : "#0f0e17"} />
+                        ) : (
+                          <>
+                            <Ionicons name="color-wand-outline" size={20} color={activeSlide?.aiStatus === 'generating' ? "#38bdf8" : "#0f0e17"} />
+                            <Text style={[styles.revealButtonText, activeSlide?.aiStatus === 'generating' && { color: '#38bdf8' }]}>
+                              {activeSlide?.aiStatus === 'generating' ? 'Processando IA...' : 'Gerar Síntese com IA e Revelar'}
+                            </Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
                     )}
                   </View>
                 )}

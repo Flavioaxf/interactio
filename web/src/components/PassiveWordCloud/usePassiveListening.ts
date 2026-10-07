@@ -4,25 +4,16 @@
  * usePassiveListening.ts
  * 
  * Custom hook para escuta passiva contínua através da Web Speech API.
- * Gerencia ciclo de vida do microfone, reinicializações automáticas após pausas
- * de silêncio e delega a contagem e filtragem de palavras para o textProcessor.worker.
+ * Acumula o transcript contínuo que será enviado posteriormente para a IA.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type {
-  PassiveListeningStatus,
-  WordFrequency,
-  TextProcessorWorkerInput,
-  TextProcessorWorkerOutput,
-} from '../../types';
-import { processText } from './textProcessor.worker';
+import type { PassiveListeningStatus } from '../../types';
 
 export interface UsePassiveListeningOptions {
   lang?: string;
   continuous?: boolean;
   interimResults?: boolean;
-  maxWords?: number;
-  minWordLength?: number;
   autoStart?: boolean;
 }
 
@@ -31,8 +22,6 @@ export interface UsePassiveListeningReturn {
   isListening: boolean;
   transcript: string;
   interimTranscript: string;
-  words: WordFrequency[];
-  totalWords: number;
   error: string | null;
   start: () => void;
   stop: () => void;
@@ -61,8 +50,6 @@ export function usePassiveListening(
     lang = 'pt-BR',
     continuous = true,
     interimResults = true,
-    maxWords = 80,
-    minWordLength = 2,
     autoStart = false,
   } = options;
 
@@ -70,59 +57,12 @@ export function usePassiveListening(
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
-  const [words, setWords] = useState<WordFrequency[]>([]);
-  const [totalWords, setTotalWords] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const shouldListenRef = useRef(false);
   const finalTranscriptRef = useRef('');
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
-  const workerRef = useRef<Worker | null>(null);
   const restartTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const dispatchTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Inicializa o Web Worker e registra event listeners de forma segura dentro do useEffect (client-side only)
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    let worker: Worker | null = null;
-    let handleMessage: ((event: MessageEvent<TextProcessorWorkerOutput>) => void) | null = null;
-
-    try {
-      worker = new Worker(new URL('./textProcessor.worker.ts', import.meta.url));
-
-      handleMessage = (event: MessageEvent<any>) => {
-        const data = event.data;
-        console.log('⚙️ Worker devolveu:', data);
-        if (data && data.type === 'WORDS_UPDATED') {
-          setWords(data.words || []);
-          setTotalWords(data.totalSpoken || 0);
-        }
-      };
-
-      worker.onmessage = handleMessage;
-      worker.addEventListener('message', handleMessage);
-      workerRef.current = worker;
-      workerRef.current.onerror = (error) => console.error('🚨 Erro crítico no Worker:', error);
-    } catch (err) {
-      console.warn(
-        '[usePassiveListening] Web Worker não pôde ser instanciado diretamente. Usando processamento síncrono como fallback.',
-        err
-      );
-      workerRef.current = null;
-    }
-
-    return () => {
-      if (worker) {
-        if (handleMessage) {
-          worker.removeEventListener('message', handleMessage);
-        }
-        worker.terminate();
-      }
-      workerRef.current = null;
-    };
-  }, []);
-
 
   // Inicialização da SpeechRecognition API
   useEffect(() => {
@@ -152,7 +92,6 @@ export function usePassiveListening(
         setStatus('listening');
         setError(null);
       } catch (err: any) {
-        // Se a API estiver em transição ou colisão de estado, agenda retry
         if (shouldListenRef.current) {
           if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
           restartTimerRef.current = setTimeout(() => {
@@ -162,7 +101,6 @@ export function usePassiveListening(
                 setIsListening(true);
                 setStatus('listening');
               } catch (e) {
-                // Já ativo
               }
             }
           }, 200);
@@ -179,7 +117,6 @@ export function usePassiveListening(
     recognition.onerror = (event: any) => {
       const errType = event.error;
 
-      // 'no-speech' ocorre rotineiramente quando o locutor pausa a fala; não deve abortar
       if (errType === 'no-speech') {
         return;
       }
@@ -200,7 +137,6 @@ export function usePassiveListening(
     };
 
     recognition.onend = () => {
-      // Força o reinício da escuta automaticamente enquanto o estado indicar que deve continuar a escutar
       if (shouldListenRef.current) {
         if (restartTimerRef.current) {
           clearTimeout(restartTimerRef.current);
@@ -224,14 +160,6 @@ export function usePassiveListening(
 
         if (item.isFinal) {
           finalTranscriptRef.current += (finalTranscriptRef.current ? ' ' : '') + text.trim();
-          if (workerRef.current && text.trim()) {
-            workerRef.current.postMessage({
-              action: 'PROCESS_TEXT',
-              text: text.trim(),
-              minWordLength,
-              maxWords
-            });
-          }
         } else {
           currentInterim += (currentInterim ? ' ' : '') + text.trim();
         }
@@ -253,10 +181,6 @@ export function usePassiveListening(
         clearTimeout(restartTimerRef.current);
         restartTimerRef.current = null;
       }
-      if (dispatchTimerRef.current) {
-        clearTimeout(dispatchTimerRef.current);
-        dispatchTimerRef.current = null;
-      }
       if (recognition) {
         recognition.onstart = null;
         recognition.onend = null;
@@ -270,17 +194,9 @@ export function usePassiveListening(
         } catch (e) {}
       }
       recognitionRef.current = null;
-
-      if (workerRef.current) {
-        try {
-          workerRef.current.terminate();
-        } catch (e) {}
-        workerRef.current = null;
-      }
     };
   }, [continuous, interimResults, lang, autoStart]);
 
-  // Controles públicos
   const start = useCallback(() => {
     if (!recognitionRef.current) {
       if (status === 'unsupported') {
@@ -295,9 +211,7 @@ export function usePassiveListening(
 
     try {
       recognitionRef.current.start();
-    } catch (e) {
-      // Caso já esteja iniciado, sem efeito adverso
-    }
+    } catch (e) {}
   }, [status]);
 
   const stop = useCallback(() => {
@@ -305,10 +219,6 @@ export function usePassiveListening(
     if (restartTimerRef.current) {
       clearTimeout(restartTimerRef.current);
       restartTimerRef.current = null;
-    }
-    if (dispatchTimerRef.current) {
-      clearTimeout(dispatchTimerRef.current);
-      dispatchTimerRef.current = null;
     }
 
     if (recognitionRef.current) {
@@ -323,13 +233,6 @@ export function usePassiveListening(
       try {
         rec.abort();
       } catch (e) {}
-    }
-
-    if (workerRef.current) {
-      try {
-        workerRef.current.terminate();
-      } catch (e) {}
-      workerRef.current = null;
     }
 
     setIsListening(false);
@@ -348,12 +251,6 @@ export function usePassiveListening(
     finalTranscriptRef.current = '';
     setTranscript('');
     setInterimTranscript('');
-    setWords([]);
-    setTotalWords(0);
-
-    if (workerRef.current) {
-      workerRef.current.postMessage({ type: 'RESET' } as TextProcessorWorkerInput);
-    }
   }, []);
 
   return {
@@ -361,8 +258,6 @@ export function usePassiveListening(
     isListening,
     transcript,
     interimTranscript,
-    words,
-    totalWords,
     error,
     start,
     stop,
