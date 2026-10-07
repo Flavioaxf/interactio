@@ -90,7 +90,9 @@ function useDisplaySession(sessionId: string) {
               timer: 0,
               anonymous: true,
               maxWordsPerUser: currentInteraction.limit === 'unlimited' ? 99 : (typeof currentInteraction.limit === 'number' ? currentInteraction.limit : 3),
+              isRevealed: Boolean(currentInteraction.isRevealed),
             },
+            isRevealed: Boolean(currentInteraction.isRevealed),
             status: 'active',
           };
           setActiveCard(card);
@@ -428,22 +430,25 @@ export default function DisplayPage({ params }: PageProps) {
           </div>
         </div>
         <span style={display.topBarCount}>
-          {activeCard.type === 'passive_word_cloud' ? 'Escuta ativa' : `${totalAnswered} respostas`}
+          {activeCard.type === 'passive_word_cloud' 
+            ? (activeCard.isRevealed ? 'Análise revelada' : 'Escuta ativa') 
+            : `${totalAnswered} respostas`}
         </span>
       </div>
 
       {/* Pergunta ou Título do Slide */}
-      {activeCard.question ? (
+      {activeCard.type !== 'passive_word_cloud' && activeCard.question ? (
         <h2 style={display.questionHeading}>{activeCard.question}</h2>
-      ) : activeCard.type === 'passive_word_cloud' ? (
-        <h2 style={display.questionHeading}>Escuta de Palco</h2>
       ) : null}
 
       {/* Resultados por tipo */}
       <div style={display.resultArea}>
         {activeCard.type === 'passive_word_cloud' && (
-          <div style={{ flex: 1, minHeight: '60vh', display: 'flex', width: '100%' }}>
-            <PassiveWordCloud />
+          <div style={{ flex: 1, minHeight: '65vh', display: 'flex', width: '100%' }}>
+            <PassiveWordCloud
+              isRevealed={Boolean(activeCard.isRevealed ?? activeCard.config?.isRevealed)}
+              question={activeCard.question}
+            />
           </div>
         )}
         {(activeCard.type === 'multiple_choice' || activeCard.type === 'quiz') && (

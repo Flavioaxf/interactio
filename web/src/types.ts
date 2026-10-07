@@ -46,6 +46,8 @@ export interface CardConfig {
   scale?:          number;   // rating: 5 ou 10
   labelMin?:       string;   // rating
   labelMax?:       string;   // rating
+  /** passive_word_cloud: se a nuvem final foi revelada ao público (default: false) */
+  isRevealed?:     boolean;
 }
 
 // ─────────────────────────────────────────────
@@ -59,6 +61,8 @@ export interface Card {
   options:  CardOptions | null;
   config:   CardConfig;
   status:   CardStatus;
+  /** passive_word_cloud: se os dados/nuvem final foram revelados ao público (default: false) */
+  isRevealed?: boolean;
 }
 
 export interface CardMap {

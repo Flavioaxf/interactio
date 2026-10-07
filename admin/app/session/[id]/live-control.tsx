@@ -478,6 +478,119 @@ export default function LiveControlScreen() {
               )}
             </View>
           )}
+          
+          {currentInteraction?.type === 'passive_word_cloud' && (
+            <View style={{ width: '100%', maxWidth: 640, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+              <View style={{
+                width: 72,
+                height: 72,
+                borderRadius: 24,
+                backgroundColor: Boolean(currentInteraction?.isRevealed) ? 'rgba(52, 211, 153, 0.15)' : 'rgba(167, 139, 250, 0.15)',
+                borderWidth: 1,
+                borderColor: Boolean(currentInteraction?.isRevealed) ? 'rgba(52, 211, 153, 0.3)' : 'rgba(167, 139, 250, 0.3)',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 20
+              }}>
+                <Ionicons 
+                  name={Boolean(currentInteraction?.isRevealed) ? "sparkles" : "mic"} 
+                  size={36} 
+                  color={Boolean(currentInteraction?.isRevealed) ? "#34d399" : "#a78bfa"} 
+                />
+              </View>
+
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+                paddingHorizontal: 14,
+                paddingVertical: 6,
+                borderRadius: 100,
+                backgroundColor: Boolean(currentInteraction?.isRevealed) ? 'rgba(52, 211, 153, 0.12)' : 'rgba(167, 139, 250, 0.12)',
+                borderWidth: 1,
+                borderColor: Boolean(currentInteraction?.isRevealed) ? 'rgba(52, 211, 153, 0.3)' : 'rgba(167, 139, 250, 0.3)',
+                marginBottom: 16
+              }}>
+                <View style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: 4,
+                  backgroundColor: Boolean(currentInteraction?.isRevealed) ? '#34d399' : '#a78bfa'
+                }} />
+                <Text style={{
+                  color: Boolean(currentInteraction?.isRevealed) ? '#34d399' : '#a78bfa',
+                  fontSize: 12,
+                  fontWeight: '800',
+                  letterSpacing: 0.8
+                }}>
+                  {Boolean(currentInteraction?.isRevealed) ? "NUVEM REVELADA NO TELÃO" : "MODO SILENCIOSO ATIVO"}
+                </Text>
+              </View>
+
+              <Text style={{
+                color: '#e8e6f0',
+                fontSize: 22,
+                fontWeight: '800',
+                textAlign: 'center',
+                marginBottom: 10
+              }}>
+                {Boolean(currentInteraction?.isRevealed) ? "Nuvem de Palavras no Telão" : "Escuta de Palco em Andamento"}
+              </Text>
+
+              <Text style={{
+                color: '#8b89a0',
+                fontSize: 14,
+                lineHeight: 22,
+                textAlign: 'center',
+                maxWidth: 480,
+                marginBottom: 28
+              }}>
+                {Boolean(currentInteraction?.isRevealed)
+                  ? "A nuvem final foi revelada ao público com todos os termos e frequências capturados."
+                  : "O sistema está acumulando as palavras silenciosamente. Quando o debate terminar, clique no botão abaixo para revelar o resultado no telão."}
+              </Text>
+
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 10,
+                  backgroundColor: Boolean(currentInteraction?.isRevealed) ? 'rgba(255, 255, 255, 0.08)' : '#a78bfa',
+                  borderWidth: Boolean(currentInteraction?.isRevealed) ? 1 : 0,
+                  borderColor: 'rgba(255, 255, 255, 0.15)',
+                  paddingVertical: 18,
+                  paddingHorizontal: 32,
+                  borderRadius: 18,
+                  shadowColor: Boolean(currentInteraction?.isRevealed) ? 'transparent' : '#a78bfa',
+                  shadowOffset: { width: 0, height: 6 },
+                  shadowOpacity: 0.35,
+                  shadowRadius: 16,
+                }}
+                onPress={async () => {
+                  const db = getDatabase();
+                  await update(ref(db, `sessions/${sessionId}/interactions/${currentIndex}`), {
+                    isRevealed: !Boolean(currentInteraction?.isRevealed),
+                  });
+                }}
+                activeOpacity={0.8}
+              >
+                <Ionicons 
+                  name={Boolean(currentInteraction?.isRevealed) ? "eye-off-outline" : "sparkles"} 
+                  size={20} 
+                  color={Boolean(currentInteraction?.isRevealed) ? "#e8e6f0" : "#0f0e17"} 
+                />
+                <Text style={{
+                  color: Boolean(currentInteraction?.isRevealed) ? '#e8e6f0' : '#0f0e17',
+                  fontSize: 16,
+                  fontWeight: '900',
+                  letterSpacing: 0.2
+                }}>
+                  {Boolean(currentInteraction?.isRevealed) ? "Ocultar Nuvem (Voltar ao Silencioso)" : "Revelar Análise Final"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </View>
 
@@ -670,7 +783,7 @@ const styles = StyleSheet.create({
   qnaScrollContent: { padding: 20, paddingBottom: 40 },
   qnaGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 24, justifyContent: 'center' },
   qnaCard: { backgroundColor: 'rgba(26, 25, 36, 0.7)', padding: 32, borderRadius: 32, width: '48%', borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.15)', flexDirection: 'row', gap: 20, alignItems: 'flex-start', shadowColor: '#38bdf8', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.05, shadowRadius: 20 },
-  qnaIconWrapper: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(56, 189, 248, 0.1)', justifyContent: 'center', alignItems: 'center', shrink: 0 },
+  qnaIconWrapper: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(56, 189, 248, 0.1)', justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
   qnaCardText: { color: '#e8e6f0', fontSize: 22, lineHeight: 32, flex: 1, fontWeight: '500' },
   
   footer: { height: 60, justifyContent: 'center', alignItems: 'center', position: 'absolute', bottom: 0, width: '100%' }, footerBrand: { color: '#5a5872', fontSize: 14, fontWeight: '600', letterSpacing: 1 },

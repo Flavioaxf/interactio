@@ -237,7 +237,9 @@ export default function ParticipantSession() {
                 </svg>
               </div>
               <p className="text-[#8b89a0] text-base sm:text-lg leading-relaxed max-w-md">
-                Acompanhe pelo telão. O áudio do palco está a ser processado.
+                {currentInteraction?.isRevealed
+                  ? 'A nuvem de palavras foi revelada! Acompanhe a síntese final pelo telão.'
+                  : 'Acompanhe pelo telão. O áudio do palco está a ser processado.'}
               </p>
             </div>
           )}

@@ -22,6 +22,7 @@ interface Slide {
   question: string;
   options: string[];
   limit?: number | 'unlimited'; 
+  isRevealed?: boolean;
 }
 
 export default function StudioScreen() {
@@ -34,6 +35,7 @@ export default function StudioScreen() {
   
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isRevealing, setIsRevealing] = useState(false);
   const [slides, setSlides] = useState<Slide[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   
@@ -64,7 +66,10 @@ export default function StudioScreen() {
         const data = snapshot.val();
 
         if (data && data.interactions && Array.isArray(data.interactions) && data.interactions.length > 0) {
-          setSlides(data.interactions);
+          setSlides(data.interactions.map((s: any) => ({
+            ...s,
+            isRevealed: Boolean(s?.isRevealed),
+          })));
           setLiveIndex(data.currentInteraction || 0);
           setIsLive(data.status === 'active');
         } else if (data && data.cards && typeof data.cards === 'object') {
@@ -76,6 +81,7 @@ export default function StudioScreen() {
               question: card?.question || '',
               options: card?.options ? Object.values(card.options).map((o: any) => o?.text || '') : ['', ''],
               limit: card?.config?.maxWordsPerUser || 3,
+              isRevealed: Boolean(card?.isRevealed ?? card?.config?.isRevealed),
             }));
             setSlides(convertedSlides);
             setLiveIndex(0);
@@ -86,7 +92,8 @@ export default function StudioScreen() {
               type: 'multiple_choice',
               question: '',
               options: ['', ''],
-              limit: 3
+              limit: 3,
+              isRevealed: false
             }]);
           }
         } else {
@@ -95,7 +102,8 @@ export default function StudioScreen() {
             type: 'multiple_choice',
             question: '',
             options: ['', ''],
-            limit: 3
+            limit: 3,
+            isRevealed: false
           }]);
         }
       } catch (err) {
@@ -105,7 +113,8 @@ export default function StudioScreen() {
           type: 'multiple_choice',
           question: '',
           options: ['', ''],
-          limit: 3
+          limit: 3,
+          isRevealed: false
         }]);
       } finally {
         setLoading(false);
@@ -121,7 +130,8 @@ export default function StudioScreen() {
       type: 'multiple_choice',
       question: '',
       options: ['', ''],
-      limit: 3
+      limit: 3,
+      isRevealed: false
     };
     setSlides([...slides, newSlide]);
     setActiveIndex(slides.length); 
@@ -171,7 +181,8 @@ export default function StudioScreen() {
         ...slide,
         question: slide?.question?.trim() || (slide?.type === 'passive_word_cloud' ? 'Escuta de Palco' : ''),
         options: slide?.type === 'multiple_choice' ? (slide?.options || []).filter(opt => opt?.trim() !== '') : [],
-        limit: slide?.type === 'word_cloud' ? (slide?.limit || 3) : 1
+        limit: slide?.type === 'word_cloud' ? (slide?.limit || 3) : 1,
+        isRevealed: slide?.type === 'passive_word_cloud' ? Boolean(slide?.isRevealed) : false,
       }));
 
       // AQUI É A CORREÇÃO: Enviamos o userId junto com os outros dados da sessão
@@ -213,7 +224,8 @@ export default function StudioScreen() {
         ...slide,
         question: slide?.question?.trim() || (slide?.type === 'passive_word_cloud' ? 'Escuta de Palco' : ''),
         options: slide?.type === 'multiple_choice' ? (slide?.options || []).filter(opt => opt?.trim() !== '') : [],
-        limit: slide?.type === 'word_cloud' ? (slide?.limit || 3) : 1
+        limit: slide?.type === 'word_cloud' ? (slide?.limit || 3) : 1,
+        isRevealed: slide?.type === 'passive_word_cloud' ? Boolean(slide?.isRevealed) : false,
       }));
 
       // AQUI É A CORREÇÃO: Enviamos o userId aqui também
@@ -231,6 +243,30 @@ export default function StudioScreen() {
     } catch (error) {
       showToast("Erro ao salvar. Verifique sua conexão.");
       setIsSaving(false);
+    }
+  };
+
+  const handleRevealPassiveCloud = async (revealState: boolean) => {
+    if (!sessionId) return;
+    setIsRevealing(true);
+    try {
+      updateCurrentSlide('isRevealed', revealState);
+
+      const db = getDatabase();
+      await update(ref(db, `sessions/${sessionId}/interactions/${activeIndex}`), {
+        isRevealed: revealState,
+      });
+
+      showToast(
+        revealState 
+          ? "Nuvem revelada no telão! 🎉" 
+          : "Nuvem ocultada. Modo silencioso reativado.",
+        'success'
+      );
+    } catch (error) {
+      showToast("Erro ao sincronizar revelação com o telão.");
+    } finally {
+      setIsRevealing(false);
     }
   };
 
@@ -432,9 +468,88 @@ export default function StudioScreen() {
                   </View>
                 )}
                 {activeSlide?.type === 'passive_word_cloud' && (
-                  <View style={[styles.infoBox, { borderColor: 'rgba(167, 139, 250, 0.2)' }, isMobile && { flexDirection: 'column', alignItems: 'flex-start', gap: 8 }]}>
-                    <Ionicons name="mic-outline" size={24} color="#a78bfa" />
-                    <Text style={styles.infoText}>Escuta de Palco: capta continuamente o áudio do palestrante e projeta uma nuvem de palavras animada em tempo real no telão, sem exigir digitação dos participantes.</Text>
+                  <View style={[
+                    styles.passiveControlCard,
+                    activeSlide?.isRevealed && styles.passiveControlCardRevealed
+                  ]}>
+                    <View style={styles.passiveControlHeader}>
+                      <View style={[
+                        styles.passiveControlIconBox,
+                        activeSlide?.isRevealed && styles.passiveControlIconBoxRevealed
+                      ]}>
+                        <Ionicons 
+                          name={activeSlide?.isRevealed ? "sparkles" : "mic"} 
+                          size={22} 
+                          color={activeSlide?.isRevealed ? "#34d399" : "#a78bfa"} 
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.passiveControlTitle}>Controle de Exibição no Telão</Text>
+                        <Text style={styles.passiveControlSubtitle}>
+                          {activeSlide?.isRevealed 
+                            ? "A nuvem final está visível para a plateia"
+                            : "As palavras estão sendo escutadas em background"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Badge de status */}
+                    <View style={[
+                      styles.passiveStatusBadge,
+                      activeSlide?.isRevealed && styles.passiveStatusBadgeRevealed
+                    ]}>
+                      <View style={[
+                        styles.passiveStatusDot,
+                        activeSlide?.isRevealed && styles.passiveStatusDotRevealed
+                      ]} />
+                      <Text style={[
+                        styles.passiveStatusText,
+                        activeSlide?.isRevealed && styles.passiveStatusTextRevealed
+                      ]}>
+                        {activeSlide?.isRevealed ? "STATUS: NUVEM REVELADA" : "STATUS: MODO SILENCIOSO ATIVO"}
+                      </Text>
+                    </View>
+
+                    <Text style={styles.passiveControlDescription}>
+                      {activeSlide?.isRevealed
+                        ? "A nuvem final de palavras está sendo exibida em tela cheia no telão com todas as palavras capturadas e frequências ponderadas."
+                        : "Durante o debate, o telão permanece em tela de espera minimalista e premium sem distrair os palestrantes. O sistema acumula as palavras continuamente."}
+                    </Text>
+
+                    {/* Botão de Destaque 'Revelar Análise Final' */}
+                    {!activeSlide?.isRevealed ? (
+                      <TouchableOpacity
+                        style={styles.revealButton}
+                        onPress={() => handleRevealPassiveCloud(true)}
+                        disabled={isRevealing}
+                        activeOpacity={0.8}
+                      >
+                        {isRevealing ? (
+                          <ActivityIndicator color="#0f0e17" />
+                        ) : (
+                          <>
+                            <Ionicons name="sparkles" size={20} color="#0f0e17" />
+                            <Text style={styles.revealButtonText}>Revelar Análise Final no Telão</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={{ gap: 10 }}>
+                        <View style={styles.revealedBanner}>
+                          <Ionicons name="checkmark-circle" size={20} color="#34d399" />
+                          <Text style={styles.revealedBannerText}>Nuvem transmitida com sucesso ao vivo</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.hideButton}
+                          onPress={() => handleRevealPassiveCloud(false)}
+                          disabled={isRevealing}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="eye-off-outline" size={16} color="#8b89a0" />
+                          <Text style={styles.hideButtonText}>Voltar para Modo Silencioso (Ocultar)</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
                   </View>
                 )}
                 {activeSlide?.type === 'q_and_a' && (
@@ -496,5 +611,142 @@ const styles = StyleSheet.create({
   
   limitRow: { flexDirection: 'row', gap: 12 }, limitButton: { flex: 1, paddingVertical: 16, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)', backgroundColor: 'rgba(255,255,255,0.02)', alignItems: 'center' }, limitButtonActive: { borderColor: 'rgba(244, 114, 182, 0.4)', backgroundColor: 'rgba(244, 114, 182, 0.1)' }, limitButtonText: { color: '#8b89a0', fontWeight: '700', fontSize: 15 }, limitButtonTextActive: { color: '#f472b6', fontWeight: '900' },
   
-  toastContainer: { position: 'absolute', top: 40, alignSelf: 'center', backgroundColor: 'rgba(26, 25, 36, 0.95)', flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 100, borderWidth: 1, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 15, zIndex: 9999, ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' } as any) }, toastIconBox: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginRight: 12 }, toastText: { color: '#e8e6f0', fontSize: 15, fontWeight: '700' }
+  toastContainer: { position: 'absolute', top: 40, alignSelf: 'center', backgroundColor: 'rgba(26, 25, 36, 0.95)', flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 100, borderWidth: 1, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 15, zIndex: 9999, ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' } as any) }, toastIconBox: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginRight: 12 }, toastText: { color: '#e8e6f0', fontSize: 15, fontWeight: '700' },
+
+  // Estilos do Painel de Controle de Escuta Passiva
+  passiveControlCard: {
+    backgroundColor: 'rgba(167, 139, 250, 0.05)',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(167, 139, 250, 0.25)',
+    padding: 28,
+    marginBottom: 20,
+    marginTop: 8,
+  },
+  passiveControlCardRevealed: {
+    backgroundColor: 'rgba(52, 211, 153, 0.05)',
+    borderColor: 'rgba(52, 211, 153, 0.3)',
+  },
+  passiveControlHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: 16,
+  },
+  passiveControlIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: 'rgba(167, 139, 250, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  passiveControlIconBoxRevealed: {
+    backgroundColor: 'rgba(52, 211, 153, 0.15)',
+  },
+  passiveControlTitle: {
+    color: '#e8e6f0',
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  passiveControlSubtitle: {
+    color: '#8b89a0',
+    fontSize: 13,
+    marginTop: 3,
+  },
+  passiveStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 100,
+    backgroundColor: 'rgba(167, 139, 250, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(167, 139, 250, 0.3)',
+    marginBottom: 14,
+  },
+  passiveStatusBadgeRevealed: {
+    backgroundColor: 'rgba(52, 211, 153, 0.12)',
+    borderColor: 'rgba(52, 211, 153, 0.3)',
+  },
+  passiveStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#a78bfa',
+  },
+  passiveStatusDotRevealed: {
+    backgroundColor: '#34d399',
+  },
+  passiveStatusText: {
+    color: '#a78bfa',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  passiveStatusTextRevealed: {
+    color: '#34d399',
+  },
+  passiveControlDescription: {
+    color: '#b4b2c5',
+    fontSize: 14,
+    lineHeight: 22,
+    marginBottom: 22,
+  },
+  revealButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#a78bfa',
+    paddingVertical: 16,
+    paddingHorizontal: 28,
+    borderRadius: 16,
+    shadowColor: '#a78bfa',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+  },
+  revealButtonText: {
+    color: '#0f0e17',
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 0.2,
+  },
+  revealedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(52, 211, 153, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.25)',
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderRadius: 14,
+  },
+  revealedBannerText: {
+    color: '#34d399',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  hideButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 14,
+  },
+  hideButtonText: {
+    color: '#8b89a0',
+    fontSize: 14,
+    fontWeight: '700',
+  },
 });
