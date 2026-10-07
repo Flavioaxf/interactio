@@ -290,15 +290,34 @@ export function usePassiveListening(
 
     return () => {
       shouldListenRef.current = false;
-      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-      if (dispatchTimerRef.current) clearTimeout(dispatchTimerRef.current);
-      try {
-        recognition.stop();
-        recognition.abort();
-      } catch (e) {
-        // Componente desmontando
+      if (restartTimerRef.current) {
+        clearTimeout(restartTimerRef.current);
+        restartTimerRef.current = null;
+      }
+      if (dispatchTimerRef.current) {
+        clearTimeout(dispatchTimerRef.current);
+        dispatchTimerRef.current = null;
+      }
+      if (recognition) {
+        recognition.onstart = null;
+        recognition.onend = null;
+        recognition.onerror = null;
+        recognition.onresult = null;
+        try {
+          recognition.stop();
+        } catch (e) {}
+        try {
+          recognition.abort();
+        } catch (e) {}
       }
       recognitionRef.current = null;
+
+      if (workerRef.current) {
+        try {
+          workerRef.current.terminate();
+        } catch (e) {}
+        workerRef.current = null;
+      }
     };
   }, [continuous, interimResults, lang, autoStart, dispatchProcessText]);
 
@@ -324,14 +343,34 @@ export function usePassiveListening(
 
   const stop = useCallback(() => {
     shouldListenRef.current = false;
-    if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+    if (dispatchTimerRef.current) {
+      clearTimeout(dispatchTimerRef.current);
+      dispatchTimerRef.current = null;
+    }
 
     if (recognitionRef.current) {
+      const rec = recognitionRef.current;
+      rec.onstart = null;
+      rec.onend = null;
+      rec.onerror = null;
+      rec.onresult = null;
       try {
-        recognitionRef.current.stop();
-      } catch (e) {
-        // Ignora erro ao parar
-      }
+        rec.stop();
+      } catch (e) {}
+      try {
+        rec.abort();
+      } catch (e) {}
+    }
+
+    if (workerRef.current) {
+      try {
+        workerRef.current.terminate();
+      } catch (e) {}
+      workerRef.current = null;
     }
 
     setIsListening(false);

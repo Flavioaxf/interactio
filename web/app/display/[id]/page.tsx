@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef, useMemo, use } from 'react';
 import { db } from '../../../src/firebase';
-import { ref, onValue } from 'firebase/database';
-import type { Card, CardMap, Response, SessionMeta } from '../../../src/types';
+import { ref, onValue, set, update } from 'firebase/database';
+import type { Card, CardMap, Response, SessionMeta, WordFrequency } from '../../../src/types';
 import { PassiveWordCloud, WordCloudGraph } from '../../../src/components/PassiveWordCloud';
 
 // ─────────────────────────────────────────────
@@ -30,7 +30,7 @@ interface WordEntry {
 
 function useDisplaySession(sessionId: string) {
   const [meta, setMeta] = useState<SessionMeta | null>(null);
-  const [activeCard, setActiveCard] = useState<Card | null>(null);
+  const [activeCard, setActiveCard] = useState<(Card & { id?: string }) | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [responses, setResponses] = useState<Record<string, Response>>({});
   const [totalAnswered, setTotalAnswered] = useState(0);
@@ -67,7 +67,8 @@ function useDisplaySession(sessionId: string) {
           status: data.status || data.meta?.status || 'active',
         };
         setMeta(sessionMeta);
-        setActiveCardId(currentInteraction?.id || `slide_${currentIndex}`);
+        const interactionId = currentInteraction?.id || String(currentIndex);
+        setActiveCardId(interactionId);
 
         if (currentInteraction) {
           let normalizedOptions: any = null;
@@ -81,7 +82,8 @@ function useDisplaySession(sessionId: string) {
             normalizedOptions = currentInteraction.options;
           }
 
-          const card: Card = {
+          const card: Card & { id?: string } = {
+            id: interactionId,
             order: currentIndex + 1,
             type: currentInteraction.type as any,
             question: currentInteraction.question ?? '',
@@ -378,7 +380,32 @@ export default function DisplayPage({ params }: PageProps) {
     ? use(params as Promise<{ id: string }>)
     : (params as { id: string });
   const sessionId = resolvedParams?.id ?? '';
-  const { meta, activeCard, responses, totalAnswered, isLoading } = useDisplaySession(sessionId);
+  const { meta, activeCard, activeCardId, responses, totalAnswered, isLoading } = useDisplaySession(sessionId);
+
+  const latestWordsRef = useRef<WordFrequency[]>([]);
+
+  // ── Persistência ao Revelar (Save on Reveal) ──
+  useEffect(() => {
+    const isRev = Boolean(activeCard?.isRevealed ?? activeCard?.config?.isRevealed);
+    const cardId = activeCard?.id || activeCardId;
+
+    if (
+      activeCard?.type === 'passive_word_cloud' &&
+      isRev &&
+      cardId &&
+      sessionId
+    ) {
+      const finalWords = latestWordsRef.current;
+      if (finalWords && finalWords.length > 0) {
+        try {
+          set(ref(db, `sessions/${sessionId}/interactions/${cardId}/results`), finalWords)
+            .catch((err) => console.error('Erro ao salvar results no Firebase:', err));
+        } catch (err) {
+          console.error('Erro ao conectar ao Firebase para salvar results:', err);
+        }
+      }
+    }
+  }, [activeCard?.isRevealed, activeCard?.config?.isRevealed, activeCard?.type, activeCard?.id, activeCardId, sessionId]);
 
   // Calcula dados do gráfico somente quando responses ou activeCard mudam
   const tally = useMemo(() => activeCard?.type === 'multiple_choice' || activeCard?.type === 'quiz'
@@ -388,6 +415,38 @@ export default function DisplayPage({ params }: PageProps) {
   const wordData = useMemo(() => activeCard?.type === 'word_cloud'
     ? tallyWordCloud(responses)
     : [], [activeCard, responses]);
+
+  // ── 0. Tratamento de Encerramento (Teardown & UI) ──
+  const isSessionEnded = meta?.status === 'ended' || meta?.status === 'finished' || meta?.status === 'closed';
+
+  if (isSessionEnded) {
+    return (
+      <div style={display.fullScreen}>
+        <div style={display.waitingState}>
+          <div style={{
+            width: 72,
+            height: 72,
+            borderRadius: 36,
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 20,
+          }}>
+            <svg style={{ width: 36, height: 36, color: '#ef4444' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <div style={display.sessionCode}>{meta?.code || sessionId.toUpperCase()}</div>
+          <h1 style={display.sessionTitle}>Sessão Encerrada</h1>
+          <p style={display.waitingHint}>
+            Esta apresentação foi finalizada pelo apresentador. Obrigado por participar!
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // ── 1. Estado de Carregamento ──
   if (isLoading) {
@@ -448,6 +507,15 @@ export default function DisplayPage({ params }: PageProps) {
             <PassiveWordCloud
               isRevealed={Boolean(activeCard.isRevealed ?? activeCard.config?.isRevealed)}
               question={activeCard.question}
+              onWordsUpdated={(words) => {
+                latestWordsRef.current = words;
+                const isRev = Boolean(activeCard?.isRevealed ?? activeCard?.config?.isRevealed);
+                const cardId = activeCard?.id || activeCardId;
+                if (isRev && cardId && sessionId && words.length > 0) {
+                  set(ref(db, `sessions/${sessionId}/interactions/${cardId}/results`), words)
+                    .catch(() => {});
+                }
+              }}
             />
           </div>
         )}

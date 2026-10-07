@@ -110,10 +110,12 @@ export default function ReportScreen() {
       interactions.forEach((interaction: any, index: number) => {
         const type = interaction.type || 'multiple_choice';
         const isQnA = type === 'qna' || type === 'q_and_a';
+        const isPassiveWordCloud = type === 'passive_word_cloud';
         
         let typeLabel = "MÚLTIPLA ESCOLHA";
         let badgeClass = "badge-mc";
         if (type === 'word_cloud') { typeLabel = "NUVEM DE PALAVRAS"; badgeClass = "badge-wc"; }
+        else if (isPassiveWordCloud) { typeLabel = "ESCUTA DE PALCO"; badgeClass = "badge-passive"; }
         else if (isQnA) { typeLabel = "RESPOSTA LIVRE"; badgeClass = "badge-qna"; }
 
         const responses = sessionData.responses ? sessionData.responses[index] : null;
@@ -157,6 +159,45 @@ export default function ReportScreen() {
           const chips = sortedWords.map(([w, c]) => `<div class="chip"><span class="chip-text">${w}</span><div class="chip-count">${c}</div></div>`);
           
           if (chips.length === 0) contentChunks = [['<div class="no-data">Nenhuma palavra enviada.</div>']];
+          else {
+            const chipGroups = chunkArray(chips, 60);
+            contentChunks = chipGroups.map(group => [`<div class="chips">${group.join('')}</div>`]);
+          }
+
+        } else if (isPassiveWordCloud) {
+          const resultsList: { text: string; count: number }[] = [];
+          if (Array.isArray(interaction.results)) {
+            interaction.results.forEach((item: any) => {
+              if (item && item.text) {
+                resultsList.push({ text: String(item.text).toUpperCase(), count: Number(item.count) || 1 });
+              }
+            });
+          } else if (interaction.results && typeof interaction.results === 'object') {
+            Object.values(interaction.results).forEach((item: any) => {
+              if (item && item.text) {
+                resultsList.push({ text: String(item.text).toUpperCase(), count: Number(item.count) || 1 });
+              }
+            });
+          }
+
+          if (resultsList.length === 0 && responses) {
+            Object.values(responses).forEach((val: any) => {
+              if (Array.isArray(val)) {
+                val.forEach(item => {
+                  if (typeof item === 'object' && item.text) {
+                    resultsList.push({ text: String(item.text).toUpperCase(), count: Number(item.count) || 1 });
+                  } else if (typeof item === 'string') {
+                    resultsList.push({ text: item.toUpperCase(), count: 1 });
+                  }
+                });
+              }
+            });
+          }
+
+          const sortedWords = resultsList.sort((a, b) => b.count - a.count);
+          const chips = sortedWords.map(w => `<div class="chip" style="background-color: rgba(167, 139, 250, 0.1); border-color: rgba(167, 139, 250, 0.2);"><span class="chip-text" style="color: #a78bfa;">${w.text}</span><div class="chip-count" style="color: #a78bfa;">${w.count}</div></div>`);
+
+          if (chips.length === 0) contentChunks = [['<div class="no-data">Nuvem gerada (Nenhum termo catalogado)</div>']];
           else {
             const chipGroups = chunkArray(chips, 60);
             contentChunks = chipGroups.map(group => [`<div class="chips">${group.join('')}</div>`]);
@@ -241,6 +282,7 @@ export default function ReportScreen() {
         .badge { display: inline-block; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 800; letter-spacing: 1px; }
         .badge-mc { background-color: rgba(167, 139, 250, 0.1); color: #a78bfa; }
         .badge-wc { background-color: rgba(244, 114, 182, 0.1); color: #f472b6; }
+        .badge-passive { background-color: rgba(167, 139, 250, 0.15); color: #a78bfa; border: 1px solid rgba(167, 139, 250, 0.3); }
         .badge-qna { background-color: rgba(56, 189, 248, 0.1); color: #38bdf8; }
         
         .question { font-size: 26px; font-weight: 800; line-height: 1.4; margin-bottom: 32px; color: #e8e6f0; }
@@ -471,6 +513,73 @@ export default function ReportScreen() {
     );
   };
 
+  const renderPassiveWordCloudResult = (interaction: any, responses: any) => {
+    const rawResults = interaction?.results;
+    let wordsList: { text: string; count: number }[] = [];
+
+    if (Array.isArray(rawResults)) {
+      wordsList = rawResults.map((w: any) => ({
+        text: String(w.text || '').toUpperCase(),
+        count: Number(w.count) || 1
+      })).filter(w => w.text);
+    } else if (rawResults && typeof rawResults === 'object') {
+      wordsList = Object.values(rawResults).map((w: any) => ({
+        text: String(w.text || '').toUpperCase(),
+        count: Number(w.count) || 1
+      })).filter(w => w.text);
+    }
+
+    if (wordsList.length === 0 && responses) {
+      Object.values(responses).forEach((val: any) => {
+        if (Array.isArray(val)) {
+          val.forEach((item: any) => {
+            if (typeof item === 'object' && item.text) {
+              wordsList.push({ text: String(item.text).toUpperCase(), count: Number(item.count) || 1 });
+            } else if (typeof item === 'string') {
+              wordsList.push({ text: item.toUpperCase(), count: 1 });
+            }
+          });
+        }
+      });
+    }
+
+    const sortedWords = wordsList.sort((a, b) => b.count - a.count);
+
+    if (sortedWords.length === 0) {
+      return (
+        <View style={{ paddingVertical: 12, alignItems: 'flex-start' }}>
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            backgroundColor: 'rgba(167, 139, 250, 0.1)',
+            paddingHorizontal: 14,
+            paddingVertical: 8,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: 'rgba(167, 139, 250, 0.25)'
+          }}>
+            <Ionicons name="sparkles" size={16} color="#a78bfa" />
+            <Text style={{ color: '#a78bfa', fontSize: 14, fontWeight: '700' }}>Nuvem gerada (Nenhum termo catalogado)</Text>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.chipsContainer}>
+        {sortedWords.map((item, idx) => (
+          <View key={idx} style={[styles.chip, { borderColor: 'rgba(167, 139, 250, 0.25)' }]}>
+            <Text style={[styles.chipText, { color: '#e8e6f0' }]}>{item.text}</Text>
+            <View style={[styles.chipBadge, { backgroundColor: 'rgba(167, 139, 250, 0.2)' }]}>
+              <Text style={[styles.chipBadgeText, { color: '#a78bfa' }]}>{item.count}</Text>
+            </View>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   const renderQnAResult = (responses: any) => {
     if (!responses) return <Text style={styles.noDataText}>Nenhuma resposta enviada.</Text>;
     
@@ -577,6 +686,7 @@ export default function ReportScreen() {
             {interactions.map((interaction: any, index: number) => {
               const type = interaction.type || 'multiple_choice';
               const isQnA = type === 'qna' || type === 'q_and_a';
+              const isPassiveWordCloud = type === 'passive_word_cloud';
               const slideResponses = sessionData.responses ? sessionData.responses[index] : null;
               
               let typeLabel = "Múltipla Escolha";
@@ -587,6 +697,10 @@ export default function ReportScreen() {
                 typeLabel = "Nuvem de Palavras";
                 iconName = "cloud-outline";
                 iconColor = "#f472b6";
+              } else if (isPassiveWordCloud) {
+                typeLabel = "Escuta de Palco";
+                iconName = "mic-outline";
+                iconColor = "#a78bfa";
               } else if (isQnA) {
                 typeLabel = "Resposta Livre";
                 iconName = "chatbubbles-outline";
@@ -610,6 +724,7 @@ export default function ReportScreen() {
                   <View style={styles.interactionBody}>
                     {type === 'multiple_choice' && renderMultipleChoiceResult(interaction, slideResponses)}
                     {type === 'word_cloud' && renderWordCloudResult(slideResponses)}
+                    {isPassiveWordCloud && renderPassiveWordCloudResult(interaction, slideResponses)}
                     {isQnA && renderQnAResult(slideResponses)}
                   </View>
                 </View>

@@ -17,7 +17,7 @@ export type SlideType =
 export type CardType = SlideType;
 
 export type CardStatus    = 'draft' | 'active' | 'closed';
-export type SessionStatus = 'draft' | 'active' | 'closed';
+export type SessionStatus = 'draft' | 'active' | 'closed' | 'finished' | 'ended';
 
 // ─────────────────────────────────────────────
 // Opções de um card de múltipla escolha / quiz

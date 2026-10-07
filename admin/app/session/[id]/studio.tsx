@@ -147,7 +147,17 @@ export default function StudioScreen() {
   const updateCurrentSlide = (field: keyof Slide, value: any) => {
     if (!slides[activeIndex]) return;
     const updatedSlides = [...slides];
-    updatedSlides[activeIndex] = { ...updatedSlides[activeIndex], [field]: value };
+    const current = updatedSlides[activeIndex];
+    const updatedSlide = { ...current, [field]: value };
+
+    if (field === 'type' && value === 'passive_word_cloud') {
+      if (!updatedSlide.question?.trim()) {
+        updatedSlide.question = 'Escuta de Palco';
+      }
+      updatedSlide.isRevealed = updatedSlide.isRevealed ?? false;
+    }
+
+    updatedSlides[activeIndex] = updatedSlide;
     setSlides(updatedSlides);
   };
 
@@ -254,6 +264,7 @@ export default function StudioScreen() {
 
       const db = getDatabase();
       await update(ref(db, `sessions/${sessionId}/interactions/${activeIndex}`), {
+        type: 'passive_word_cloud',
         isRevealed: revealState,
       });
 

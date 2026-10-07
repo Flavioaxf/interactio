@@ -47,6 +47,8 @@ export interface PassiveWordCloudProps {
   showTranscriptPreview?: boolean;
   /** Callback opcional quando o estado de revelação é alternado na UI */
   onToggleReveal?: (revealed: boolean) => void;
+  /** Callback opcional quando a lista de palavras é atualizada pelo Web Worker */
+  onWordsUpdated?: (words: WordFrequency[]) => void;
   /** Classe CSS customizada */
   className?: string;
   /** Estilos inline customizados */
@@ -64,6 +66,7 @@ export function PassiveWordCloud({
   showControls = true,
   showTranscriptPreview = false,
   onToggleReveal,
+  onWordsUpdated,
   className = '',
   style = {},
 }: PassiveWordCloudProps) {
@@ -84,6 +87,13 @@ export function PassiveWordCloud({
     maxWords,
     minWordLength,
   });
+
+  // Notifica o componente pai sempre que a lista processada pelo Web Worker atualizar
+  React.useEffect(() => {
+    if (onWordsUpdated) {
+      onWordsUpdated(words);
+    }
+  }, [words, onWordsUpdated]);
 
   const [showLiveText, setShowLiveText] = useState(showTranscriptPreview);
 
