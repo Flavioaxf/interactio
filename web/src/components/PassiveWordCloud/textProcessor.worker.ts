@@ -203,49 +203,68 @@ export function processText(
 // Listener de mensagens do Web Worker (executado estritamente no contexto de Web Worker do navegador)
 // ─────────────────────────────────────────────
 
+let persistentFreqMap = new Map<string, number>();
+let totalSpokenWords = 0;
+let totalValidTerms = 0;
+
 if (
   typeof self !== 'undefined' &&
   typeof window === 'undefined'
 ) {
-  const handleWorkerMessage = (event: MessageEvent<TextProcessorWorkerInput>) => {
+  const handleWorkerMessage = (event: MessageEvent<any>) => {
     const data = event.data;
     if (!data) return;
 
-    switch (data.type) {
-      case 'PROCESS_TEXT': {
-        const text = data.text ?? '';
-        const { words, totalWords } = processText(text, {
-          minWordLength: data.minWordLength,
-          maxWords: data.maxWords,
-        });
+    if (data.action === 'PROCESS_TEXT' || data.type === 'PROCESS_TEXT') {
+      const text = data.text ?? '';
+      const minWordLength = data.minWordLength ?? 2;
+      const maxWords = data.maxWords ?? 80;
 
-        const response: TextProcessorWorkerOutput = {
+      if (text && typeof text === 'string') {
+        const cleaned = text.replace(/[^\p{L}\s]/gu, ' ').toLowerCase();
+        const tokens = cleaned.split(/\s+/).filter(Boolean);
+
+        for (let i = 0; i < tokens.length; i++) {
+          const word = normalizeWord(tokens[i]);
+          if (word.length > 0) {
+            totalSpokenWords++;
+          }
+          
+          if (word.length >= minWordLength && !isStopWord(word)) {
+            const current = persistentFreqMap.get(word) ?? 0;
+            persistentFreqMap.set(word, current + 1);
+            totalValidTerms++;
+          }
+        }
+      }
+
+      const sortedWords = Array.from(persistentFreqMap.entries())
+        .map(([text, count]) => ({ text, count }))
+        .sort((a, b) => b.count - a.count || a.text.localeCompare(b.text));
+
+      const words = maxWords > 0 ? sortedWords.slice(0, maxWords) : sortedWords;
+
+      if (typeof (self as any).postMessage === 'function') {
+        (self as any).postMessage({
           type: 'WORDS_UPDATED',
           words,
-          totalWords,
-        };
-
-        if (typeof (self as any).postMessage === 'function') {
-          (self as any).postMessage(response);
-        }
-        break;
+          totalSpoken: totalSpokenWords,
+          totalTerms: totalValidTerms
+        });
       }
+    } else if (data.action === 'RESET' || data.type === 'RESET') {
+      persistentFreqMap.clear();
+      totalSpokenWords = 0;
+      totalValidTerms = 0;
 
-      case 'RESET': {
-        const response: TextProcessorWorkerOutput = {
+      if (typeof (self as any).postMessage === 'function') {
+        (self as any).postMessage({
           type: 'WORDS_UPDATED',
           words: [],
-          totalWords: 0,
-        };
-
-        if (typeof (self as any).postMessage === 'function') {
-          (self as any).postMessage(response);
-        }
-        break;
+          totalSpoken: 0,
+          totalTerms: 0
+        });
       }
-
-      default:
-        break;
     }
   };
 

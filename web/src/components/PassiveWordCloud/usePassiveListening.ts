@@ -91,12 +91,12 @@ export function usePassiveListening(
     try {
       worker = new Worker(new URL('./textProcessor.worker.ts', import.meta.url));
 
-      handleMessage = (event: MessageEvent<TextProcessorWorkerOutput>) => {
+      handleMessage = (event: MessageEvent<any>) => {
         const data = event.data;
         console.log('⚙️ Worker devolveu:', data);
         if (data && data.type === 'WORDS_UPDATED') {
-          setWords(data.words);
-          setTotalWords(data.totalWords);
+          setWords(data.words || []);
+          setTotalWords(data.totalSpoken || 0);
         }
       };
 
@@ -123,51 +123,6 @@ export function usePassiveListening(
     };
   }, []);
 
-  // Envia texto para ser processado pelo worker (ou executa o fallback)
-  const dispatchProcessText = useCallback(
-    (textToProcess: string) => {
-      if (dispatchTimerRef.current) {
-        clearTimeout(dispatchTimerRef.current);
-      }
-
-      dispatchTimerRef.current = setTimeout(() => {
-        if (workerRef.current) {
-          const input: TextProcessorWorkerInput = {
-            type: 'PROCESS_TEXT',
-            text: textToProcess,
-            minWordLength,
-            maxWords,
-          };
-          try {
-            workerRef.current.postMessage(input);
-          } catch (postErr) {
-            console.warn('[usePassiveListening] Erro ao comunicar com Worker, usando fallback:', postErr);
-            const result = processText(textToProcess, { minWordLength, maxWords });
-            const data: TextProcessorWorkerOutput = {
-              type: 'WORDS_UPDATED',
-              words: result.words,
-              totalWords: result.totalWords,
-            };
-            console.log('⚙️ Worker devolveu:', data);
-            setWords(result.words);
-            setTotalWords(result.totalWords);
-          }
-        } else {
-          // Fallback síncrono se worker indisponível
-          const result = processText(textToProcess, { minWordLength, maxWords });
-          const data: TextProcessorWorkerOutput = {
-            type: 'WORDS_UPDATED',
-            words: result.words,
-            totalWords: result.totalWords,
-          };
-          console.log('⚙️ Worker devolveu:', data);
-          setWords(result.words);
-          setTotalWords(result.totalWords);
-        }
-      }, 60);
-    },
-    [maxWords, minWordLength]
-  );
 
   // Inicialização da SpeechRecognition API
   useEffect(() => {
@@ -269,6 +224,14 @@ export function usePassiveListening(
 
         if (item.isFinal) {
           finalTranscriptRef.current += (finalTranscriptRef.current ? ' ' : '') + text.trim();
+          if (workerRef.current && text.trim()) {
+            workerRef.current.postMessage({
+              action: 'PROCESS_TEXT',
+              text: text.trim(),
+              minWordLength,
+              maxWords
+            });
+          }
         } else {
           currentInterim += (currentInterim ? ' ' : '') + text.trim();
         }
@@ -277,10 +240,6 @@ export function usePassiveListening(
       const fullAccumulated = finalTranscriptRef.current;
       setTranscript(fullAccumulated);
       setInterimTranscript(currentInterim);
-
-      const combinedText = (fullAccumulated + ' ' + currentInterim).trim();
-      console.log('🗣️ Voz captada:', combinedText);
-      dispatchProcessText(combinedText);
     };
 
     if (autoStart) {
@@ -319,7 +278,7 @@ export function usePassiveListening(
         workerRef.current = null;
       }
     };
-  }, [continuous, interimResults, lang, autoStart, dispatchProcessText]);
+  }, [continuous, interimResults, lang, autoStart]);
 
   // Controles públicos
   const start = useCallback(() => {
