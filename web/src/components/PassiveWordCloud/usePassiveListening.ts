@@ -1,12 +1,5 @@
 'use client';
 
-/**
- * usePassiveListening.ts
- * 
- * Custom hook para escuta passiva contínua através da Web Speech API.
- * Acumula o transcript contínuo que será enviado posteriormente para a IA.
- */
-
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { PassiveListeningStatus } from '../../types';
 
@@ -29,223 +22,128 @@ export interface UsePassiveListeningReturn {
   reset: () => void;
 }
 
-interface SpeechRecognitionInstance extends EventTarget {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  maxAlternatives: number;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-  onstart: ((this: SpeechRecognitionInstance, ev: Event) => any) | null;
-  onend: ((this: SpeechRecognitionInstance, ev: Event) => any) | null;
-  onerror: ((this: SpeechRecognitionInstance, ev: any) => any) | null;
-  onresult: ((this: SpeechRecognitionInstance, ev: any) => any) | null;
-}
-
-export function usePassiveListening(
-  options: UsePassiveListeningOptions = {}
-): UsePassiveListeningReturn {
-  const {
-    lang = 'pt-BR',
-    continuous = true,
-    interimResults = true,
-    autoStart = false,
-  } = options;
-
+export function usePassiveListening({
+  lang = 'pt-BR',
+  continuous = true,
+  interimResults = true,
+  autoStart = false,
+}: UsePassiveListeningOptions = {}): UsePassiveListeningReturn {
   const [status, setStatus] = useState<PassiveListeningStatus>('idle');
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const shouldListenRef = useRef(false);
+  const recognitionRef = useRef<any>(null);
   const finalTranscriptRef = useRef('');
-  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
-  const restartTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isIntentionallyPaused = useRef(!autoStart);
+  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Inicialização da SpeechRecognition API
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const SpeechRecognitionConstructor =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognitionConstructor) {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
       setStatus('unsupported');
-      setError('A API de Reconhecimento de Fala (Web Speech API) não é suportada por este navegador.');
+      setError('Reconhecimento de voz não suportado neste navegador.');
       return;
     }
 
-    const recognition: SpeechRecognitionInstance = new SpeechRecognitionConstructor();
+    const recognition = new SpeechRecognition();
     recognition.continuous = continuous;
     recognition.interimResults = interimResults;
     recognition.lang = lang;
-    recognitionRef.current = recognition;
-
-    const startRecognitionSafely = () => {
-      if (!shouldListenRef.current || !recognitionRef.current) return;
-      try {
-        recognitionRef.current.start();
-        setIsListening(true);
-        setStatus('listening');
-        setError(null);
-      } catch (err: any) {
-        if (shouldListenRef.current) {
-          if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-          restartTimerRef.current = setTimeout(() => {
-            if (shouldListenRef.current && recognitionRef.current) {
-              try {
-                recognitionRef.current.start();
-                setIsListening(true);
-                setStatus('listening');
-              } catch (e) {
-              }
-            }
-          }, 200);
-        }
-      }
-    };
 
     recognition.onstart = () => {
-      setIsListening(true);
+      console.log('🎤 [Microfone] Escuta iniciada com sucesso.');
       setStatus('listening');
+      setIsListening(true);
       setError(null);
     };
 
+    recognition.onresult = (event: any) => {
+      let currentInterim = '';
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        const text = event.results[i][0].transcript;
+        
+        if (event.results[i].isFinal) {
+          console.log('🗣️ [Voz Captada]:', text.trim());
+          finalTranscriptRef.current += (finalTranscriptRef.current ? ' ' : '') + text.trim();
+        } else {
+          currentInterim += text;
+        }
+      }
+
+      setTranscript(finalTranscriptRef.current);
+      setInterimTranscript(currentInterim);
+    };
+
     recognition.onerror = (event: any) => {
-      const errType = event.error;
-
-      if (errType === 'no-speech') {
-        return;
-      }
-
-      if (errType === 'not-allowed' || errType === 'service-not-allowed') {
-        shouldListenRef.current = false;
-        setIsListening(false);
+      if (event.error === 'aborted') return; // Ignora o erro silenciosamente
+      
+      console.warn(`⚠️ [Erro no Microfone]: ${event.error}`);
+      
+      if (event.error === 'not-allowed') {
         setStatus('error');
-        setError('Acesso ao microfone negado ou bloqueado nas configurações do navegador.');
-        return;
-      }
-
-      if (errType === 'network') {
-        setError('Falha de conexão com o serviço de reconhecimento de voz. Tentando reconectar...');
-      } else {
-        console.warn('[usePassiveListening] Aviso no reconhecimento de voz:', errType);
+        setError('Acesso ao microfone negado.');
+        setIsListening(false);
+        isIntentionallyPaused.current = true;
       }
     };
 
     recognition.onend = () => {
-      if (shouldListenRef.current) {
-        if (restartTimerRef.current) {
-          clearTimeout(restartTimerRef.current);
-        }
-
-        restartTimerRef.current = setTimeout(() => {
-          startRecognitionSafely();
-        }, 100);
+      if (!isIntentionallyPaused.current) {
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = setTimeout(() => {
+          try {
+            recognition.start();
+          } catch (e) {
+            console.warn('Falha ao reconectar o microfone:', e);
+          }
+        }, 500); 
       } else {
         setIsListening(false);
         setStatus('idle');
       }
     };
 
-    recognition.onresult = (event: any) => {
-      let currentInterim = '';
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const item = event.results[i];
-        const text = item[0]?.transcript ?? '';
-
-        if (item.isFinal) {
-          finalTranscriptRef.current += (finalTranscriptRef.current ? ' ' : '') + text.trim();
-        } else {
-          currentInterim += (currentInterim ? ' ' : '') + text.trim();
-        }
-      }
-
-      const fullAccumulated = finalTranscriptRef.current;
-      setTranscript(fullAccumulated);
-      setInterimTranscript(currentInterim);
-    };
+    recognitionRef.current = recognition;
 
     if (autoStart) {
-      shouldListenRef.current = true;
-      startRecognitionSafely();
+      isIntentionallyPaused.current = false;
+      try { recognition.start(); } catch (e) {}
     }
 
     return () => {
-      shouldListenRef.current = false;
-      if (restartTimerRef.current) {
-        clearTimeout(restartTimerRef.current);
-        restartTimerRef.current = null;
+      isIntentionallyPaused.current = true;
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch (e) {}
       }
-      if (recognition) {
-        recognition.onstart = null;
-        recognition.onend = null;
-        recognition.onerror = null;
-        recognition.onresult = null;
-        try {
-          recognition.stop();
-        } catch (e) {}
-        try {
-          recognition.abort();
-        } catch (e) {}
-      }
-      recognitionRef.current = null;
     };
-  }, [continuous, interimResults, lang, autoStart]);
+  }, [lang, continuous, interimResults, autoStart]);
 
   const start = useCallback(() => {
-    if (!recognitionRef.current) {
-      if (status === 'unsupported') {
-        setError('Reconhecimento de voz não suportado neste navegador.');
-      }
-      return;
-    }
-
-    shouldListenRef.current = true;
-    setError(null);
-    setStatus('listening');
-
-    try {
-      recognitionRef.current.start();
-    } catch (e) {}
-  }, [status]);
+    if (!recognitionRef.current) return;
+    isIntentionallyPaused.current = false;
+    try { recognitionRef.current.start(); } catch (e) {}
+  }, []);
 
   const stop = useCallback(() => {
-    shouldListenRef.current = false;
-    if (restartTimerRef.current) {
-      clearTimeout(restartTimerRef.current);
-      restartTimerRef.current = null;
-    }
-
+    isIntentionallyPaused.current = true;
+    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
     if (recognitionRef.current) {
-      const rec = recognitionRef.current;
-      rec.onstart = null;
-      rec.onend = null;
-      rec.onerror = null;
-      rec.onresult = null;
-      try {
-        rec.stop();
-      } catch (e) {}
-      try {
-        rec.abort();
-      } catch (e) {}
+      try { recognitionRef.current.stop(); } catch (e) {}
     }
-
     setIsListening(false);
     setStatus('idle');
   }, []);
 
   const toggle = useCallback(() => {
-    if (shouldListenRef.current) {
-      stop();
-    } else {
-      start();
-    }
-  }, [start, stop]);
+    isListening ? stop() : start();
+  }, [isListening, start, stop]);
 
   const reset = useCallback(() => {
     finalTranscriptRef.current = '';
@@ -253,15 +151,5 @@ export function usePassiveListening(
     setInterimTranscript('');
   }, []);
 
-  return {
-    status,
-    isListening,
-    transcript,
-    interimTranscript,
-    error,
-    start,
-    stop,
-    toggle,
-    reset,
-  };
+  return { status, isListening, transcript, interimTranscript, error, start, stop, toggle, reset };
 }

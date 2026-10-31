@@ -3,10 +3,11 @@
 /**
  * WordCloudGraph.tsx
  * 
- * Componente de visualização em tempo real de Nuvem de Palavras animada.
- * Utiliza HTML5 Canvas com aceleração gráfica e D3 Force Simulation para
- * calcular dinamicamente colisões, forças atrativas e posicionamento elástico
- * conforme novas palavras são capturadas e suas frequências aumentam.
+ * Nuvem de Palavras - Estilo Mentimeter Definitivo
+ * Correções:
+ * 1. Colisão Pixel-Perfect: Usa actualBoundingBox do Canvas para medir acentos e descendentes, evitando sobreposições.
+ * 2. Regra Vertical Restrita: Apenas palavras únicas (sem espaços) podem ficar na vertical.
+ * 3. Espiral Ovalada: Força as frases longas a se distribuírem horizontalmente, acabando com o empilhamento vertical.
  */
 
 import React, { useEffect, useRef, useMemo } from 'react';
@@ -14,31 +15,20 @@ import * as d3 from 'd3';
 import type { WordFrequency } from '../../types';
 
 export interface WordCloudGraphProps {
-  /** Lista de palavras com suas frequências */
   data?: WordFrequency[];
-  /** Alias para retrocompatibilidade */
   words?: WordFrequency[];
-  /** Largura personalizada (opcional, padrão: 100% do container) */
   width?: number;
-  /** Altura personalizada (opcional, padrão: 100% do container) */
   height?: number;
-  /** Tamanho mínimo da fonte em pixels */
   minFontSize?: number;
-  /** Tamanho máximo da fonte em pixels */
   maxFontSize?: number;
-  /** Família tipográfica */
   fontFamily?: string;
-  /** Paleta de cores para os termos */
   colors?: string[];
-  /** Limite máximo de termos visíveis simultaneamente */
   maxDisplayWords?: number;
-  /** Classe CSS do container */
   className?: string;
-  /** Estilos inline adicionais */
   style?: React.CSSProperties;
 }
 
-interface WordNode extends d3.SimulationNodeDatum {
+interface WordNode {
   id: string;
   text: string;
   count: number;
@@ -46,35 +36,38 @@ interface WordNode extends d3.SimulationNodeDatum {
   targetFontSize: number;
   width: number;
   height: number;
-  radius: number;
   color: string;
   alpha: number;
   targetAlpha: number;
-  x?: number;
-  y?: number;
-  vx?: number;
-  vy?: number;
+  x: number;
+  y: number;
+  targetX: number;
+  targetY: number;
+  isVertical: boolean;
+  bounds: { left: number; right: number; top: number; bottom: number };
 }
 
 const DEFAULT_PALETTE = [
-  '#a78bfa', // Roxo suave
-  '#60a5fa', // Azul céu
-  '#34d399', // Esmeralda
-  '#fbbf24', // Âmbar
-  '#f87171', // Coral
-  '#38bdf8', // Ciano
-  '#c084fc', // Violeta
-  '#4ade80', // Verde menta
-  '#fb7185', // Rosa
+  '#34d399', '#f87171', '#38bdf8', '#fbbf24', '#a78bfa', 
+  '#fb7185', '#4ade80', '#c084fc', '#60a5fa'
 ];
+
+function getHash(str: string) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
 
 export function WordCloudGraph({
   data,
   words: wordsProp,
   width: customWidth,
   height: customHeight,
-  minFontSize = 20,
-  maxFontSize = 80,
+  minFontSize = 18,
+  maxFontSize = 100,
   fontFamily = 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
   colors = DEFAULT_PALETTE,
   maxDisplayWords = 70,
@@ -82,21 +75,22 @@ export function WordCloudGraph({
   style = {},
 }: WordCloudGraphProps) {
   const words = useMemo(() => data ?? wordsProp ?? [], [data, wordsProp]);
+  const wordsStr = useMemo(() => JSON.stringify(words.slice(0, maxDisplayWords)), [words, maxDisplayWords]);
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Armazena nós persistentes para garantir continuidade das posições e transições orgânicas
   const nodesRef = useRef<Map<string, WordNode>>(new Map());
-  const simulationRef = useRef<d3.Simulation<WordNode, undefined> | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const dimensionsRef = useRef<{ width: number; height: number }>({ width: 800, height: 600 });
+  
+  const targetScaleRef = useRef<number>(1);
+  const currentScaleRef = useRef<number>(0.1); 
 
-  // Escala de cores D3 memorizada
   const colorScale = useMemo(() => {
     return d3.scaleOrdinal<string, string>().range(colors);
   }, [colors]);
 
-  // Inicializa o Canvas e o ResizeObserver
   useEffect(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
@@ -118,78 +112,25 @@ export function WordCloudGraph({
       if (ctx) {
         ctx.scale(dpr, dpr);
       }
-
-      // Atualiza forças de centralização no D3
-      if (simulationRef.current) {
-        simulationRef.current
-          .force('center', d3.forceCenter(w / 2, h / 2).strength(0.08))
-          .force('x', d3.forceX(w / 2).strength(0.06))
-          .force('y', d3.forceY(h / 2).strength(0.06));
-        simulationRef.current.alpha(0.3).restart();
-      }
     };
 
     updateDimensions();
-
-    const resizeObserver = new ResizeObserver(() => {
-      updateDimensions();
-    });
-
+    const resizeObserver = new ResizeObserver(() => updateDimensions());
     resizeObserver.observe(container);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
+    return () => resizeObserver.disconnect();
   }, [customWidth, customHeight]);
 
-  // Configuração da Simulação D3
-  useEffect(() => {
-    const { width, height } = dimensionsRef.current;
-
-    const simulation = d3
-      .forceSimulation<WordNode>([])
-      .force('center', d3.forceCenter(width / 2, height / 2).strength(0.08))
-      .force('x', d3.forceX(width / 2).strength(0.06))
-      .force('y', d3.forceY(height / 2).strength(0.06))
-      .force(
-        'collide',
-        d3
-          .forceCollide<WordNode>((d) => d.radius + 6)
-          .strength(0.9)
-          .iterations(2)
-      )
-      .force(
-        'charge',
-        d3
-          .forceManyBody<WordNode>()
-          .strength((d) => -d.radius * 2)
-      )
-      .alphaDecay(0.02)
-      .velocityDecay(0.3);
-
-    simulationRef.current = simulation;
-
-    return () => {
-      simulation.stop();
-      simulationRef.current = null;
-    };
-  }, []);
-
-  // Atualização dos nós conforme as palavras mudam
+  // CÁLCULO FÍSICO E DISTRIBUIÇÃO OVAL
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const activeList = words.slice(0, maxDisplayWords);
+    const activeList: WordFrequency[] = JSON.parse(wordsStr);
+    
     if (activeList.length === 0) {
-      nodesRef.current.forEach((n) => {
-        n.targetAlpha = 0;
-      });
-      if (simulationRef.current) {
-        simulationRef.current.alpha(0.2).restart();
-      }
+      nodesRef.current.forEach((n) => { n.targetAlpha = 0; });
       return;
     }
 
@@ -197,45 +138,99 @@ export function WordCloudGraph({
     const maxCount = Math.max(...counts, 1);
     const minCount = Math.min(...counts, 1);
 
-    const { width, height } = dimensionsRef.current;
     const currentMap = nodesRef.current;
     const activeKeys = new Set<string>();
 
-    activeList.forEach((item) => {
+    const sortedActiveList = [...activeList].sort((a, b) => b.count - a.count);
+    const placedNodes: WordNode[] = [];
+
+    let minLeft = 0, maxRight = 0, minTop = 0, maxBottom = 0;
+
+    sortedActiveList.forEach((item, index) => {
       const key = item.text.toLowerCase();
       activeKeys.add(key);
 
-      // Interpolação de tamanho da fonte baseada na frequência
-      const normalizedRatio =
-        maxCount === minCount ? 0.5 : (item.count - minCount) / (maxCount - minCount);
-      const targetFontSize = Math.round(
-        minFontSize + normalizedRatio * (maxFontSize - minFontSize)
-      );
+      const normalizedRatio = maxCount === minCount ? 0.5 : (item.count - minCount) / (maxCount - minCount);
+      const targetFontSize = Math.round(minFontSize + normalizedRatio * (maxFontSize - minFontSize));
 
-      // Medição precisa do raio de colisão baseado no canvas
-      ctx.font = `bold ${targetFontSize}px ${fontFamily}`;
+      ctx.font = `900 ${targetFontSize}px ${fontFamily}`;
+      
+      // Medição Pixel-Perfect do Canvas: Pega a largura exata e a altura real (incluindo acentos/descendentes)
       const metrics = ctx.measureText(item.text);
       const textWidth = metrics.width;
-      const textHeight = targetFontSize;
-      const radius = Math.sqrt(Math.pow(textWidth / 2, 2) + Math.pow(textHeight / 2, 2)) + 4;
+      
+      // Fallback de segurança caso o navegador não suporte actualBoundingBox
+      const actualHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
+      const textHeight = (actualHeight && actualHeight > 0) ? actualHeight : targetFontSize * 0.85;
+
+      const wordHash = getHash(key);
+      
+      // REGRA VERTICAL ESTRITA: Apenas palavras únicas (sem espaço) e curtas podem ficar em pé.
+      const isSingleWord = !item.text.includes(' ');
+      const isVertical = index > 0 && isSingleWord && item.text.length <= 10 && (wordHash % 100) > 70;
+
+      // Respiro (Padding) garantido entre as palavras para não colar uma na outra
+      const padX = 14; 
+      const padY = 10; 
+
+      const w = (isVertical ? textHeight : textWidth) + padX;
+      const h = (isVertical ? textWidth : textHeight) + padY;
+
+      let t = 0; 
+      let targetX = 0;
+      let targetY = 0;
+      let bounds = { left: 0, right: 0, top: 0, bottom: 0 };
+      let hasPlaced = false;
+
+      // Desloca o ângulo inicial para que o centro seja atacado por todos os lados
+      const startAngle = (wordHash % 360) * (Math.PI / 180);
+
+      while (!hasPlaced && t < 5000) {
+        let r = 1.5 * t; 
+        let angle = startAngle + t;
+
+        // O SEGREDO DO TETRIS HORIZONTAL: Multiplicador 1.8 espalha no eixo X (laterais), 
+        // e 0.6 espreme no eixo Y. Isso impede o "empilhamento" e cria uma nuvem larga e orgânica.
+        targetX = r * Math.cos(angle) * 1.8;
+        targetY = r * Math.sin(angle) * 0.6;
+
+        bounds = {
+          left: targetX - w / 2,
+          right: targetX + w / 2,
+          top: targetY - h / 2,
+          bottom: targetY + h / 2
+        };
+
+        const collision = placedNodes.some(p => {
+          return !(bounds.left >= p.bounds.right || bounds.right <= p.bounds.left || 
+                   bounds.top >= p.bounds.bottom || bounds.bottom <= p.bounds.top);
+        });
+
+        if (!collision) {
+          hasPlaced = true;
+          if (bounds.left < minLeft) minLeft = bounds.left;
+          if (bounds.right > maxRight) maxRight = bounds.right;
+          if (bounds.top < minTop) minTop = bounds.top;
+          if (bounds.bottom > maxBottom) maxBottom = bounds.bottom;
+        } else {
+          t += 0.1; // Passo ultra preciso para achar frestas menores
+        }
+      }
 
       const existingNode = currentMap.get(key);
 
       if (existingNode) {
-        // Atualiza propriedades preservando posição e velocidade
         existingNode.count = item.count;
         existingNode.targetFontSize = targetFontSize;
         existingNode.width = textWidth;
         existingNode.height = textHeight;
-        existingNode.radius = radius;
+        existingNode.targetX = targetX;
+        existingNode.targetY = targetY;
+        existingNode.isVertical = isVertical;
+        existingNode.bounds = bounds;
         existingNode.targetAlpha = 1;
+        placedNodes.push(existingNode);
       } else {
-        // Novo termo: surge do centro com leve dispersão aleatória
-        const angle = Math.random() * Math.PI * 2;
-        const distance = Math.random() * 40;
-        const initialX = width / 2 + Math.cos(angle) * distance;
-        const initialY = height / 2 + Math.sin(angle) * distance;
-
         const newNode: WordNode = {
           id: key,
           text: item.text,
@@ -244,36 +239,43 @@ export function WordCloudGraph({
           targetFontSize,
           width: textWidth,
           height: textHeight,
-          radius,
           color: colorScale(key),
           alpha: 0,
           targetAlpha: 1,
-          x: initialX,
-          y: initialY,
-          vx: (Math.random() - 0.5) * 2,
-          vy: (Math.random() - 0.5) * 2,
+          x: targetX * 0.1, 
+          y: targetY * 0.1,
+          targetX,
+          targetY,
+          isVertical,
+          bounds,
         };
-
         currentMap.set(key, newNode);
+        placedNodes.push(newNode);
       }
     });
 
-    // Termos que saíram da lista realizam fade out gradual
+    const cloudTotalWidth = Math.max(maxRight - minLeft, 100);
+    const cloudTotalHeight = Math.max(maxBottom - minTop, 100);
+    const { width, height } = dimensionsRef.current;
+    
+    const safeAreaWidth = width * 0.85;
+    const safeAreaHeight = height * 0.85;
+
+    let newScale = 1;
+    if (cloudTotalWidth > safeAreaWidth || cloudTotalHeight > safeAreaHeight) {
+      newScale = Math.min(safeAreaWidth / cloudTotalWidth, safeAreaHeight / cloudTotalHeight);
+    }
+    targetScaleRef.current = newScale;
+
     currentMap.forEach((node, key) => {
       if (!activeKeys.has(key)) {
         node.targetAlpha = 0;
       }
     });
 
-    // Atualiza nós da simulação D3
-    if (simulationRef.current) {
-      const nodeList = Array.from(currentMap.values());
-      simulationRef.current.nodes(nodeList);
-      simulationRef.current.alpha(0.35).restart();
-    }
-  }, [words, minFontSize, maxFontSize, fontFamily, maxDisplayWords, colorScale]);
+  }, [wordsStr, minFontSize, maxFontSize, fontFamily, maxDisplayWords, colorScale]);
 
-  // Loop contínuo de renderização via RequestAnimationFrame
+  // MOTOR DE ANIMAÇÃO
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -291,18 +293,19 @@ export function WordCloudGraph({
       const currentMap = nodesRef.current;
       const nodesToDelete: string[] = [];
 
-      // Converte e ordena nós por contagem para que os termos maiores sobreponham os menores
-      const sortedNodes = Array.from(currentMap.values()).sort(
-        (a, b) => a.count - b.count
-      );
+      currentScaleRef.current += (targetScaleRef.current - currentScaleRef.current) * 0.08;
 
+      ctx.save();
+      ctx.translate(width / 2, height / 2);
+      ctx.scale(currentScaleRef.current, currentScaleRef.current);
+
+      const sortedNodes = Array.from(currentMap.values()).sort((a, b) => a.count - b.count);
       const maxCount = Math.max(...sortedNodes.map((n) => n.count), 1);
 
       sortedNodes.forEach((node) => {
-        // Transição suave de fonte (lerp)
+        node.x += (node.targetX - node.x) * 0.08;
+        node.y += (node.targetY - node.y) * 0.08;
         node.fontSize += (node.targetFontSize - node.fontSize) * 0.12;
-
-        // Transição suave de transparência (fade in / fade out)
         node.alpha += (node.targetAlpha - node.alpha) * 0.1;
 
         if (node.alpha <= 0.02 && node.targetAlpha === 0) {
@@ -310,34 +313,36 @@ export function WordCloudGraph({
           return;
         }
 
-        if (node.alpha <= 0 || node.x == null || node.y == null) return;
+        if (node.alpha <= 0) return;
 
         ctx.save();
         ctx.globalAlpha = Math.max(0, Math.min(1, node.alpha));
 
         const isProminent = node.count >= maxCount * 0.7 && node.count > 1;
 
-        // Efeito de brilho neon nos termos dominantes
         if (isProminent) {
           ctx.shadowColor = node.color;
-          ctx.shadowBlur = 14;
+          ctx.shadowBlur = 15;
         }
 
-        ctx.font = `700 ${Math.round(node.fontSize)}px ${fontFamily}`;
+        ctx.font = `900 ${Math.round(node.fontSize)}px ${fontFamily}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = node.color;
 
-        ctx.fillText(node.text, node.x, node.y);
+        ctx.translate(node.x, node.y);
+        if (node.isVertical) {
+          ctx.rotate(-Math.PI / 2);
+        }
+        
+        ctx.fillText(node.text, 0, 0);
         ctx.restore();
       });
 
-      // Remove definitivamente nós expirados
+      ctx.restore();
+
       if (nodesToDelete.length > 0) {
         nodesToDelete.forEach((id) => currentMap.delete(id));
-        if (simulationRef.current) {
-          simulationRef.current.nodes(Array.from(currentMap.values()));
-        }
       }
 
       animFrameRef.current = requestAnimationFrame(render);
@@ -347,9 +352,7 @@ export function WordCloudGraph({
 
     return () => {
       isRunning = false;
-      if (animFrameRef.current) {
-        cancelAnimationFrame(animFrameRef.current);
-      }
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
   }, [fontFamily]);
 
@@ -359,10 +362,7 @@ export function WordCloudGraph({
       className={`relative w-full h-full min-h-[60vh] flex items-center justify-center overflow-hidden ${className}`}
       style={{ minHeight: 400, ...style }}
     >
-      <canvas
-        ref={canvasRef}
-        className="block w-full h-full pointer-events-none"
-      />
+      <canvas ref={canvasRef} className="block w-full h-full pointer-events-none" />
       {words.length === 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none text-slate-500/70">
           <p className="text-sm font-medium animate-pulse tracking-wide">
